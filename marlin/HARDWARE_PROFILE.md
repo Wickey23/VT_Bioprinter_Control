@@ -16,9 +16,10 @@ Filled from the physical machine inspection on 2026-10-02.
 - Y stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
 - Z stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
 - Extruder/syringe driver(s): Board hardware code **T8** observed; final syringe-channel mapping not yet verified
-- X endstop location/type: Not yet verified
-- Y endstop location/type: Not yet verified
-- Z endstop location/type: Not yet verified
+- X endstop status (M119 baseline): **open**
+- Y endstop status (M119 baseline): **TRIGGERED**
+- Z endstop status (M119 baseline): **open**
+- Endstop physical mapping / polarity verification: **In progress — each switch still needs to be actuated manually and re-queried**
 - Number of independently driven syringe heads: Not yet verified
 - Power supply voltage: Not yet verified from PSU output label
 - AC input / rated power from printer label: 100–120 V / 200–240 V AC, 50/60 Hz, **350 W**
@@ -28,4 +29,4 @@ Filled from the physical machine inspection on 2026-10-02.
 
 Current Marlin source includes a Creality V4.2.2 GD32F303RE target (`BOARD_CREALITY_V422_GD32_MFL`), but the first custom flash remains gated on confirming the complete MCU package marking, endstop behavior, motor directions, and syringe-head wiring.
 
-Do not home any axis until `M119` has been checked and each motor direction has been tested conservatively.
+Do not home any axis until `M119` has been checked with each endstop physically actuated and each motor direction has been tested conservatively.

@@ -1,24 +1,27 @@
 # Hardware Profile — REQUIRED BEFORE FLASHING
 
-Fill this out from the physical machine.
+Filled from the physical machine inspection on 2026-10-02.
 
-- Ender 5 variant:
-- Controller manufacturer:
-- Controller board revision:
-- MCU marking:
-- Existing firmware/version (M115):
-- USB serial device on Pi:
-- X stepper driver:
-- Y stepper driver:
-- Z stepper driver:
-- Extruder/syringe driver(s):
-- X endstop location/type:
-- Y endstop location/type:
-- Z endstop location/type:
-- Number of independently driven syringe heads:
-- Power supply voltage:
-- Notes/photos:
+- Mechanical platform / printer variant: Custom bioprinter assembly using Creality hardware; base electronics label identifies **Ender-3 V2**
+- Controller manufacturer: Creality
+- Controller board revision: **V4.2.2**
+- MCU marking: **GigaDevice GD32F303-series**. Package marking is partially obscured by installed wiring in the inspection photos; exact suffix still needs direct visual confirmation before first custom flash.
+- Existing firmware/version (M115): Not yet queried
+- USB serial device on Pi: Not yet detected
+- X stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
+- Y stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
+- Z stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
+- Extruder/syringe driver(s): Board hardware code **T8** observed; final syringe-channel mapping not yet verified
+- X endstop location/type: Not yet verified
+- Y endstop location/type: Not yet verified
+- Z endstop location/type: Not yet verified
+- Number of independently driven syringe heads: Not yet verified
+- Power supply voltage: Not yet verified from PSU output label
+- AC input / rated power from printer label: 100–120 V / 200–240 V AC, 50/60 Hz, **350 W**
+- Notes/photos: Physical inspection confirms Creality V4.2.2 controller. Raspberry Pi is mounted on the custom bioprinter structure. Do not flash firmware until the remaining electrical and motion fields are verified.
 
 ## Gate
 
-Do not select a Marlin motherboard, pin map, PlatformIO environment, or driver type until these fields are verified.
+Current Marlin source includes a Creality V4.2.2 GD32F303RE target (`BOARD_CREALITY_V422_GD32_MFL`), but the first custom flash remains gated on confirming the complete MCU package marking, endstop behavior, motor directions, and syringe-head wiring.
+
+Do not home any axis until `M119` has been checked and each motor direction has been tested conservatively.

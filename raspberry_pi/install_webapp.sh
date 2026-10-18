@@ -10,45 +10,83 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_DIR="$HOME/.config/vt-bioprinter"
 TOKEN_FILE="$CONFIG_DIR/token"
+
 SERVICE_NAME="vt-bioprinter-web.service"
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
+
 NETWORK_HELPER_TARGET="/usr/local/sbin/vt-bioprinter-network"
+HOTSPOT_FALLBACK_TARGET="/usr/local/sbin/vt-bioprinter-hotspot-fallback"
+HOTSPOT_SERVICE_NAME="vt-bioprinter-hotspot-fallback.service"
+HOTSPOT_SERVICE_PATH="/etc/systemd/system/$HOTSPOT_SERVICE_NAME"
 SUDOERS_PATH="/etc/sudoers.d/vt-bioprinter-network"
+
+HOTSPOT_NAME="VT-Bioprinter-Setup"
+HOTSPOT_PASSWORD="bioprinter"
+HOTSPOT_IP="10.42.0.1/24"
 
 echo "=== Installing VT Bioprinter web controller ==="
 
 cd "$REPO_DIR"
 git pull --ff-only
 
-echo "[1/7] Installing Python dependencies..."
+echo "[1/9] Installing Python dependencies..."
 if [[ ! -x "$SCRIPT_DIR/.venv/bin/python" ]]; then
   python3 -m venv "$SCRIPT_DIR/.venv"
 fi
 "$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
 
-echo "[2/7] Creating controller access key..."
+echo "[2/9] Configuring simple local controller key..."
 mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
-if [[ ! -s "$TOKEN_FILE" ]]; then
-  python3 - <<'PY' > "$TOKEN_FILE"
-import secrets
-print(secrets.token_urlsafe(24))
-PY
-fi
+printf '%s\n' 'enter' > "$TOKEN_FILE"
 chmod 600 "$TOKEN_FILE"
 
-echo "[3/7] Installing restricted network helper..."
+echo "[3/9] Installing restricted network helpers..."
 sudo install -o root -g root -m 0755 "$SCRIPT_DIR/network_helper.sh" "$NETWORK_HELPER_TARGET"
+sudo install -o root -g root -m 0755 "$SCRIPT_DIR/hotspot_fallback.sh" "$HOTSPOT_FALLBACK_TARGET"
 printf '%s\n' "$USER ALL=(root) NOPASSWD: $NETWORK_HELPER_TARGET *" | sudo tee "$SUDOERS_PATH" >/dev/null
 sudo chmod 0440 "$SUDOERS_PATH"
 sudo visudo -cf "$SUDOERS_PATH" >/dev/null
 
-echo "[4/7] Installing systemd service..."
+echo "[4/9] Creating direct-access Wi-Fi profile..."
+if sudo nmcli -t -f NAME connection show | grep -Fxq "$HOTSPOT_NAME"; then
+  echo "Hotspot profile already exists; refreshing settings."
+else
+  sudo nmcli connection add type wifi ifname wlan0 con-name "$HOTSPOT_NAME" ssid "$HOTSPOT_NAME"
+fi
+
+sudo nmcli connection modify "$HOTSPOT_NAME" \
+  connection.autoconnect no \
+  802-11-wireless.mode ap \
+  802-11-wireless.band bg \
+  ipv4.method shared \
+  ipv4.addresses "$HOTSPOT_IP" \
+  ipv6.method disabled \
+  802-11-wireless-security.key-mgmt wpa-psk \
+  802-11-wireless-security.psk "$HOTSPOT_PASSWORD"
+
+echo "[5/9] Installing automatic hotspot fallback..."
+sudo tee "$HOTSPOT_SERVICE_PATH" >/dev/null <<EOF
+[Unit]
+Description=VT Bioprinter fallback setup hotspot
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=$HOTSPOT_FALLBACK_TARGET
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl enable "$HOTSPOT_SERVICE_NAME"
+
+echo "[6/9] Installing web-controller service..."
 sudo tee "$SERVICE_PATH" >/dev/null <<EOF
 [Unit]
 Description=VT Bioprinter Web Controller
-After=network-online.target
-Wants=network-online.target
+After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
@@ -66,33 +104,40 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-echo "[5/7] Enabling service..."
+echo "[7/9] Enabling and restarting web controller..."
 sudo systemctl daemon-reload
-sudo systemctl enable --now "$SERVICE_NAME"
+sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl restart "$SERVICE_NAME"
 
-echo "[6/7] Service check..."
+echo "[8/9] Service check..."
 sleep 2
 sudo systemctl --no-pager --full status "$SERVICE_NAME" || true
 
-echo "[7/7] Local health check..."
+echo "[9/9] Local health check..."
 curl -fsS http://127.0.0.1:8080/api/health || true
 echo
 
 IP="$(hostname -I | awk '{print $1}')"
-TOKEN="$(cat "$TOKEN_FILE")"
 
 echo
-echo "==============================================="
-echo "VT Bioprinter web controller installed."
+echo "===================================================="
+echo "VT Bioprinter controller installed."
 echo
-echo "Open on this Pi/network:"
+echo "NORMAL NETWORK ACCESS"
 echo "  http://vt-3dprinter.local:8080"
 if [[ -n "$IP" ]]; then
   echo "  http://$IP:8080"
 fi
 echo
-echo "Controller access key:"
-echo "  $TOKEN"
+echo "CONTROLLER ACCESS KEY"
+echo "  enter"
 echo
-echo "Keep this key private. The UI will ask for it once and store it in that browser."
-echo "==============================================="
+echo "DIRECT / FALLBACK WI-FI"
+echo "  Wi-Fi name: $HOTSPOT_NAME"
+echo "  Wi-Fi password: $HOTSPOT_PASSWORD"
+echo "  Controller URL: http://10.42.0.1:8080"
+echo
+echo "If no normal Wi-Fi is active after boot, the Pi will"
+echo "automatically start the setup hotspot after about 25 seconds."
+echo "The Network page can also turn hotspot mode on or off manually."
+echo "===================================================="

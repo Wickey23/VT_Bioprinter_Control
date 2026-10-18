@@ -218,13 +218,37 @@
         <article class="card">
           <div class="card-title">
             <div>
+              <p class="eyebrow">Direct access</p>
+              <h3>Setup hotspot</h3>
+            </div>
+            <span id="hotspotBadge" class="pill">CHECKING</span>
+          </div>
+          <div class="detail-list">
+            <div><span>Wi-Fi name</span><strong id="hotspotSsid">VT-Bioprinter-Setup</strong></div>
+            <div><span>Wi-Fi password</span><strong id="hotspotPassword">bioprinter</strong></div>
+            <div><span>Controller address</span><strong id="hotspotUrl">http://10.42.0.1:8080</strong></div>
+          </div>
+          <div class="notice">If the Pi cannot join normal Wi-Fi after boot, it automatically starts this network. You can also start it manually below.</div>
+          <div class="locked-controls">
+            <button id="hotspotOn" class="secondary">Start setup hotspot</button>
+          </div>
+          <p id="hotspotMessage" class="muted"></p>
+        </article>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
               <p class="eyebrow">Wi-Fi</p>
               <h3>Available networks</h3>
             </div>
             <button id="scanWifi" class="secondary">Scan</button>
           </div>
+          <div class="manual-network">
+            <input id="manualSsid" type="text" placeholder="Network name (SSID)" />
+            <button id="manualConnect" class="secondary">Connect to other network</button>
+          </div>
           <div id="wifiList" class="wifi-list">
-            <p class="muted">Press Scan to search for nearby Wi-Fi networks.</p>
+            <p class="muted">Press Scan to search for nearby Wi-Fi networks, or enter the SSID manually.</p>
           </div>
         </article>
       </section>

@@ -99,3 +99,28 @@ or use the IPv4 address printed by the installer.
 Changing Wi-Fi can interrupt the current browser session while the Pi obtains a new address. Reopen the hostname or new IP after the network transition.
 
 The web controller is intended for a trusted local research network or trusted remote access. Do not expose port 8080 directly to the public internet.
+
+
+## Direct-access setup hotspot
+
+The controller can also broadcast its own Wi-Fi network so a phone, tablet, or laptop can reach the printer without sharing an existing Wi-Fi network.
+
+Default direct-access settings:
+
+- SSID: `VT-Bioprinter-Setup`
+- Wi-Fi password: `bioprinter`
+- Controller URL: `http://10.42.0.1:8080`
+- Web-controller access key: `enter`
+
+Behavior:
+
+1. On a normal boot, the Pi first gets a chance to connect to a saved Wi-Fi network.
+2. If no Wi-Fi connection is active after about 25 seconds, the fallback service activates `VT-Bioprinter-Setup`.
+3. A user can connect directly to that SSID and open `http://10.42.0.1:8080`.
+4. From the Network page, the user can scan for normal Wi-Fi or manually enter an SSID and password.
+5. When a normal Wi-Fi connection is requested from hotspot mode, the hotspot is stopped and the Pi attempts to join the requested network.
+6. If that connection attempt fails, the helper restores the setup hotspot.
+
+The Network page also includes a manual **Start setup hotspot** control. Starting it intentionally disconnects the Pi from its current Wi-Fi because the built-in Wi-Fi adapter is being switched into access-point mode.
+
+This hotspot is for local/direct controller access. It should not be treated as an internet-facing management interface.

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import shutil
@@ -23,10 +22,16 @@ STATIC_DIR = BASE_DIR / "static"
 CONFIG_DIR = Path(os.environ.get("VT_BIOPRINTER_CONFIG_DIR", Path.home() / ".config" / "vt-bioprinter"))
 TOKEN_FILE = CONFIG_DIR / "token"
 NETWORK_HELPER = Path(os.environ.get("VT_BIOPRINTER_NETWORK_HELPER", "/usr/local/sbin/vt-bioprinter-network"))
+
 BAUD = 115200
 SAFE_COMMANDS = {"M105", "M114", "M115", "M119", "M503"}
 
-app = FastAPI(title="VT Bioprinter Controller", version="0.1.0")
+HOTSPOT_NAME = "VT-Bioprinter-Setup"
+HOTSPOT_PASSWORD = "bioprinter"
+HOTSPOT_IP = "10.42.0.1"
+HOTSPOT_URL = f"http://{HOTSPOT_IP}:8080"
+
+app = FastAPI(title="VT Bioprinter Controller", version="0.2.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -101,32 +106,59 @@ def split_nmcli(line: str, maxsplit: int = -1) -> list[str]:
     return out
 
 
-def network_status() -> dict[str, Any]:
-    ssid = None
-    signal = None
-    security = None
+def active_wifi_connection() -> str | None:
     try:
-        for line in nmcli_lines("ACTIVE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "ifname", "wlan0"):
-            parts = split_nmcli(line, 3)
-            if len(parts) >= 4 and parts[0] == "yes":
-                ssid, signal, security = parts[1], parts[2], parts[3]
-                break
+        for line in nmcli_lines("NAME,TYPE", "connection", "show", "--active"):
+            parts = split_nmcli(line, 1)
+            if len(parts) == 2 and parts[1] == "802-11-wireless":
+                return parts[0]
     except Exception:
         pass
+    return None
 
-    ip_address = None
-    proc = run_command(["hostname", "-I"], timeout=3)
-    if proc.returncode == 0:
-        addrs = [x for x in proc.stdout.strip().split() if "." in x]
-        if addrs:
-            ip_address = addrs[0]
+
+def wlan_ipv4() -> str | None:
+    proc = run_command(["nmcli", "-g", "IP4.ADDRESS", "device", "show", "wlan0"], timeout=5)
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        value = line.strip()
+        if "." in value:
+            return value.split("/", 1)[0]
+    return None
+
+
+def network_status() -> dict[str, Any]:
+    connection_name = active_wifi_connection()
+    hotspot_active = connection_name == HOTSPOT_NAME
+
+    ssid = HOTSPOT_NAME if hotspot_active else None
+    signal = None
+    security = "WPA2" if hotspot_active else None
+
+    if not hotspot_active:
+        try:
+            for line in nmcli_lines("ACTIVE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "ifname", "wlan0"):
+                parts = split_nmcli(line, 3)
+                if len(parts) >= 4 and parts[0] == "yes":
+                    ssid, signal, security = parts[1], parts[2], parts[3]
+                    break
+        except Exception:
+            pass
+
+    ip_address = wlan_ipv4()
+    if hotspot_active:
+        ip_address = HOTSPOT_IP
 
     return {
-        "connected": bool(ssid),
-        "ssid": ssid,
+        "connected": bool(connection_name),
+        "ssid": ssid or connection_name,
+        "connection_name": connection_name,
         "signal": int(signal) if signal and signal.isdigit() else None,
         "security": security,
         "ip_address": ip_address,
+        "hotspot_active": hotspot_active,
+        "mode": "hotspot" if hotspot_active else ("wifi" if connection_name else "offline"),
     }
 
 
@@ -134,7 +166,10 @@ def scan_networks() -> list[dict[str, Any]]:
     try:
         lines = nmcli_lines("SSID,SIGNAL,SECURITY,IN-USE", "device", "wifi", "list", "--rescan", "yes", "ifname", "wlan0")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Wi-Fi scan failed: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Wi-Fi scan failed: {exc}. If the setup hotspot is active, you can still enter an SSID manually.",
+        )
 
     seen: dict[str, dict[str, Any]] = {}
     for line in lines:
@@ -142,7 +177,7 @@ def scan_networks() -> list[dict[str, Any]]:
         if len(parts) < 4:
             continue
         ssid, signal, security, in_use = parts
-        if not ssid:
+        if not ssid or ssid == HOTSPOT_NAME:
             continue
         item = {
             "ssid": ssid,
@@ -154,6 +189,15 @@ def scan_networks() -> list[dict[str, Any]]:
         if old is None or item["signal"] > old["signal"]:
             seen[ssid] = item
     return sorted(seen.values(), key=lambda x: (not x["in_use"], -x["signal"], x["ssid"].lower()))
+
+
+def run_network_helper(action: str, argument: str | None = None, input_text: str | None = None, timeout: float = 45.0) -> subprocess.CompletedProcess[str]:
+    if not NETWORK_HELPER.exists():
+        raise HTTPException(status_code=503, detail="Network helper is not installed.")
+    args = ["sudo", "-n", str(NETWORK_HELPER), action]
+    if argument is not None:
+        args.append(argument)
+    return run_command(args, timeout=timeout, input_text=input_text)
 
 
 def printer_candidates() -> list[dict[str, Any]]:
@@ -279,13 +323,7 @@ def api_network_scan() -> dict[str, Any]:
 
 @app.post("/api/network/connect", dependencies=[Depends(require_token)])
 def api_network_connect(payload: WifiConnectRequest) -> JSONResponse:
-    if not NETWORK_HELPER.exists():
-        raise HTTPException(status_code=503, detail="Network helper is not installed.")
-    proc = run_command(
-        ["sudo", "-n", str(NETWORK_HELPER), "connect", payload.ssid],
-        timeout=45,
-        input_text=payload.password + "\n",
-    )
+    proc = run_network_helper("connect", payload.ssid, payload.password + "\n", timeout=50)
     if proc.returncode != 0:
         raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to connect.")
     return JSONResponse(
@@ -305,19 +343,49 @@ def api_network_saved() -> dict[str, Any]:
     saved = []
     for line in proc.stdout.splitlines():
         parts = split_nmcli(line, 1)
-        if len(parts) == 2 and parts[1] == "802-11-wireless":
+        if len(parts) == 2 and parts[1] == "802-11-wireless" and parts[0] != HOTSPOT_NAME:
             saved.append(parts[0])
     return {"connections": saved}
 
 
 @app.post("/api/network/forget", dependencies=[Depends(require_token)])
 def api_network_forget(payload: WifiForgetRequest) -> dict[str, Any]:
-    if not NETWORK_HELPER.exists():
-        raise HTTPException(status_code=503, detail="Network helper is not installed.")
-    proc = run_command(["sudo", "-n", str(NETWORK_HELPER), "forget", payload.connection], timeout=15)
+    proc = run_network_helper("forget", payload.connection, timeout=15)
     if proc.returncode != 0:
         raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to forget network.")
     return {"ok": True, "output": proc.stdout.strip()}
+
+
+@app.get("/api/network/hotspot", dependencies=[Depends(require_token)])
+def api_hotspot_status() -> dict[str, Any]:
+    status = network_status()
+    return {
+        "active": status["hotspot_active"],
+        "ssid": HOTSPOT_NAME,
+        "password": HOTSPOT_PASSWORD,
+        "ip_address": HOTSPOT_IP,
+        "url": HOTSPOT_URL,
+        "fallback_enabled": True,
+    }
+
+
+@app.post("/api/network/hotspot/enable", dependencies=[Depends(require_token)])
+def api_hotspot_enable() -> dict[str, Any]:
+    proc = run_network_helper("hotspot-on", timeout=25)
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to start hotspot.")
+    return {
+        "ok": True,
+        "message": f"Setup hotspot requested. Connect to {HOTSPOT_NAME} and open {HOTSPOT_URL}.",
+    }
+
+
+@app.post("/api/network/hotspot/disable", dependencies=[Depends(require_token)])
+def api_hotspot_disable() -> dict[str, Any]:
+    proc = run_network_helper("hotspot-off", timeout=20)
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to stop hotspot.")
+    return {"ok": True, "message": "Setup hotspot disabled."}
 
 
 @app.get("/api/printer/status", dependencies=[Depends(require_token)])

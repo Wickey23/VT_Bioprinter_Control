@@ -64,3 +64,38 @@ Do not enable motion until:
 - an immediate power-off method is available.
 
 Prefer the stable `/dev/serial/by-id/...` path when available for the final service configuration.
+
+
+## Web controller
+
+A browser-based controller is available in `raspberry_pi/webapp/`. It is designed to run continuously on the Pi and currently provides:
+
+- Raspberry Pi health/status
+- printer USB/CH340 detection
+- read-only Marlin diagnostics (`M105`, `M114`, `M115`, `M119`, `M503`)
+- commissioning lock for all motion/homing/extrusion controls
+- Wi-Fi status, scanning, switching, and saved-network management
+- responsive phone/tablet/laptop interface
+- access-key protection
+
+Install it after the base Pi setup:
+
+```bash
+cd ~/VT_Bioprinter_Control
+git pull
+cd raspberry_pi
+chmod +x install_webapp.sh
+./install_webapp.sh
+```
+
+The installer prints the controller access key and enables the service at boot. On the same network, open:
+
+```text
+http://vt-3dprinter.local:8080
+```
+
+or use the IPv4 address printed by the installer.
+
+Changing Wi-Fi can interrupt the current browser session while the Pi obtains a new address. Reopen the hostname or new IP after the network transition.
+
+The web controller is intended for a trusted local research network or trusted remote access. Do not expose port 8080 directly to the public internet.

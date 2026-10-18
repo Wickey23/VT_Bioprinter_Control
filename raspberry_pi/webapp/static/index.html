@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>VT Bioprinter Controller</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="loginOverlay" class="overlay">
+    <form id="loginForm" class="login-card">
+      <div class="brand-mark">VT</div>
+      <h1>Bioprinter Controller</h1>
+      <p>Enter the controller access key shown during installation.</p>
+      <input id="tokenInput" type="password" autocomplete="current-password" placeholder="Controller access key" required />
+      <button class="primary" type="submit">Open Controller</button>
+      <div id="loginError" class="error"></div>
+    </form>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark small">VT</div>
+        <div>
+          <strong>Bioprinter</strong>
+          <span>Control System</span>
+        </div>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-page="dashboard">Dashboard</button>
+        <button class="nav-btn" data-page="printer">Printer</button>
+        <button class="nav-btn" data-page="network">Network</button>
+        <button class="nav-btn" data-page="system">System</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="sidebarDot" class="dot"></span>
+        <span id="sidebarStatus">Checking controller…</span>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Virginia Tech Research Controller</p>
+          <h1 id="pageTitle">Dashboard</h1>
+        </div>
+        <button id="refreshAll" class="ghost">Refresh</button>
+      </header>
+
+      <section id="page-dashboard" class="page active">
+        <div class="status-banner">
+          <div>
+            <span class="status-label">SYSTEM STATUS</span>
+            <h2 id="heroStatus">Controller online</h2>
+            <p id="heroSub">Waiting for live system data.</p>
+          </div>
+          <div id="heroPill" class="pill">CHECKING</div>
+        </div>
+
+        <div class="grid four">
+          <article class="card metric">
+            <span>Raspberry Pi</span>
+            <strong id="piState">—</strong>
+            <small id="piHost">—</small>
+          </article>
+          <article class="card metric">
+            <span>Printer</span>
+            <strong id="printerState">—</strong>
+            <small id="printerDevice">—</small>
+          </article>
+          <article class="card metric">
+            <span>Wi-Fi</span>
+            <strong id="wifiState">—</strong>
+            <small id="wifiIp">—</small>
+          </article>
+          <article class="card metric">
+            <span>CPU</span>
+            <strong id="cpuTemp">—</strong>
+            <small>Raspberry Pi temperature</small>
+          </article>
+        </div>
+
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Printer safety</p>
+                <h3>Commissioning lock</h3>
+              </div>
+              <span class="lock-badge">LOCKED</span>
+            </div>
+            <p>Motion, homing, extrusion, and arbitrary G-code stay disabled until motor directions and endstops are physically verified in the lab.</p>
+            <div class="locked-controls">
+              <button disabled>Home X</button>
+              <button disabled>Home Y</button>
+              <button disabled>Home Z</button>
+              <button disabled>Jog</button>
+              <button disabled>Extrude</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Storage</p>
+                <h3>Host capacity</h3>
+              </div>
+            </div>
+            <div class="storage-row">
+              <span>Used</span>
+              <strong id="diskUsed">—</strong>
+            </div>
+            <div class="progress"><div id="diskBar"></div></div>
+            <div class="storage-row muted">
+              <span>Free</span>
+              <span id="diskFree">—</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-printer" class="page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">USB / Marlin</p>
+                <h3>Printer connection</h3>
+              </div>
+              <span id="printerConnectionBadge" class="pill">CHECKING</span>
+            </div>
+            <div id="printerDetails" class="detail-list"></div>
+            <button id="refreshPrinter" class="secondary">Detect printer</button>
+          </article>
+
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Read-only diagnostics</p>
+                <h3>Safe Marlin probe</h3>
+              </div>
+              <span class="lock-badge">NO MOTION</span>
+            </div>
+            <div class="command-grid">
+              <button class="safe-command" data-command="M115">M115<br><small>Firmware</small></button>
+              <button class="safe-command" data-command="M119">M119<br><small>Endstops</small></button>
+              <button class="safe-command" data-command="M503">M503<br><small>Settings</small></button>
+              <button class="safe-command" data-command="M114">M114<br><small>Position</small></button>
+              <button class="safe-command" data-command="M105">M105<br><small>Temperature</small></button>
+            </div>
+            <pre id="terminal">Printer diagnostics will appear here.</pre>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Future controls</p>
+              <h3>Motion & syringe control</h3>
+            </div>
+            <span class="lock-badge">COMMISSIONING REQUIRED</span>
+          </div>
+          <div class="control-preview">
+            <div class="axis-pad">
+              <button disabled>+Y</button>
+              <div>
+                <button disabled>−X</button>
+                <button disabled>HOME</button>
+                <button disabled>+X</button>
+              </div>
+              <button disabled>−Y</button>
+            </div>
+            <div class="z-controls">
+              <button disabled>Z +</button>
+              <button disabled>Z −</button>
+            </div>
+            <div class="syringe-controls">
+              <label>Syringe amount</label>
+              <input disabled value="1.0 mL" />
+              <button disabled>Extrude</button>
+              <button disabled>Retract</button>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="page-network" class="page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Current connection</p>
+                <h3 id="currentSsid">—</h3>
+              </div>
+              <span id="wifiBadge" class="pill">CHECKING</span>
+            </div>
+            <div class="detail-list">
+              <div><span>IP address</span><strong id="currentIp">—</strong></div>
+              <div><span>Signal</span><strong id="currentSignal">—</strong></div>
+              <div><span>Security</span><strong id="currentSecurity">—</strong></div>
+            </div>
+            <div class="notice">Changing Wi-Fi can temporarily disconnect this page while the Pi joins the new network.</div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Saved profiles</p>
+                <h3>Known networks</h3>
+              </div>
+            </div>
+            <div id="savedNetworks" class="saved-list"></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Wi-Fi</p>
+              <h3>Available networks</h3>
+            </div>
+            <button id="scanWifi" class="secondary">Scan</button>
+          </div>
+          <div id="wifiList" class="wifi-list">
+            <p class="muted">Press Scan to search for nearby Wi-Fi networks.</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="page-system" class="page">
+        <div class="grid two">
+          <article class="card">
+            <p class="eyebrow">Raspberry Pi</p>
+            <h3>System information</h3>
+            <div id="systemDetails" class="detail-list"></div>
+          </article>
+          <article class="card">
+            <p class="eyebrow">Access</p>
+            <h3>Controller security</h3>
+            <p>This controller is intended for the local research network or trusted remote access. Do not expose port 8080 directly to the public internet.</p>
+            <button id="forgetToken" class="danger-outline">Forget browser access key</button>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="wifiDialog">
+    <form id="wifiForm" method="dialog">
+      <p class="eyebrow">Connect to network</p>
+      <h3 id="dialogSsid">Wi-Fi</h3>
+      <input id="wifiPassword" type="password" autocomplete="new-password" placeholder="Wi-Fi password (leave blank for open network)" />
+      <div class="dialog-actions">
+        <button type="button" id="cancelWifi" class="ghost">Cancel</button>
+        <button type="submit" class="primary">Connect</button>
+      </div>
+      <p id="wifiDialogMessage" class="muted"></p>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

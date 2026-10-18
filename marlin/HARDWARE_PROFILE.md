@@ -11,7 +11,10 @@ Filled from the physical machine inspection on 2026-10-02.
 - Existing extruder count (M115): **1**
 - Existing firmware capabilities observed: EEPROM enabled; SD card enabled; thermal protection enabled; auto-leveling / Z probe not enabled
 - Windows USB serial device: **USB-SERIAL CH340 (COM5)**
-- Raspberry Pi: **Not present in the current lab setup**
+- Raspberry Pi host: **Raspberry Pi 4 (4 GB), hostname `vt-3dprinter`, Raspberry Pi OS 64-bit / aarch64**
+- Raspberry Pi host software status (2026-10-18): **staged and verified** — Python 3.13.5, PySerial 3.5, `dialout` membership active, SSH active, Raspberry Pi Connect active
+- Raspberry Pi no-printer USB baseline (2026-10-18): no `/dev/ttyUSB*` or `/dev/ttyACM*` devices present and `/dev/serial/by-id` absent, as expected with the Creality controller disconnected
+- Raspberry Pi printer serial path: **pending lab connection to the Creality V4.2.2 controller**
 - X/Y/Z motor wiring: **Not connected yet at time of inspection**
 - X stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
 - Y stepper driver: Board hardware code **T8** observed; driver type not yet independently verified
@@ -24,7 +27,7 @@ Filled from the physical machine inspection on 2026-10-02.
 - Number of independently driven syringe heads: Not yet verified
 - Power supply voltage: Not yet verified from PSU output label
 - AC input / rated power from printer label: 100–120 V / 200–240 V AC, 50/60 Hz, **350 W**
-- Notes/photos: Physical inspection confirms Creality V4.2.2 controller. Current communication is direct from a Windows laptop to the printer controller over CH340 USB serial. Do not flash firmware until the remaining electrical and motion fields are verified.
+- Notes/photos: Physical inspection confirms Creality V4.2.2 controller. Windows direct communication to the printer controller over CH340 USB serial has been verified previously. The Raspberry Pi host is now fully staged; printer-side serial detection on the Pi is pending the next lab connection. Do not flash firmware until the remaining electrical and motion fields are verified.
 
 ## Gate
 

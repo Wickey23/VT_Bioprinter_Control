@@ -100,8 +100,16 @@ def main() -> int:
     print("SAFE MODE: M115, M119, and M503 only. No motion/homing.")
 
     try:
-        with serial.Serial(target.device, BAUD, timeout=0.25) as port:
+        with serial.Serial(target.device, BAUD, timeout=0.25, exclusive=True) as port:
+            # Opening some CH340-connected Creality boards can leave a partial
+            # garbage line in Marlin's receive buffer. Terminate that line with
+            # a blank newline, discard the resulting response, then begin the
+            # read-only probe on a clean command boundary.
             time.sleep(1.5)
+            port.reset_input_buffer()
+            port.write(b"\n")
+            port.flush()
+            time.sleep(0.35)
             port.reset_input_buffer()
 
             for cmd in SAFE_COMMANDS:

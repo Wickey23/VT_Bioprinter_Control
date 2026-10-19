@@ -243,8 +243,15 @@ def send_safe_command(command: str) -> dict[str, Any]:
 
     lines: list[str] = []
     try:
-        with serial.Serial(target["device"], BAUD, timeout=0.25) as port:
+        with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+            # Synchronize to a clean Marlin command boundary. CH340-connected
+            # Creality boards can occasionally have a partial garbage line in
+            # the firmware RX buffer immediately after the port is opened.
             time.sleep(1.0)
+            port.reset_input_buffer()
+            port.write(b"\n")
+            port.flush()
+            time.sleep(0.35)
             port.reset_input_buffer()
             port.write((normalized + "\n").encode("ascii"))
             port.flush()

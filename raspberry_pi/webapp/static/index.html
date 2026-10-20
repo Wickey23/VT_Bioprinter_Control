@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-live3" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -256,8 +256,8 @@
             <span id="liveCameraBadge" class="pill">STOPPED</span>
           </div>
           <div class="live-toolbar">
-            <button id="startLiveCamera" class="primary">Start live feed</button>
-            <button id="stopLiveCamera" class="secondary" disabled>Stop live feed</button>
+            <button id="startLiveCamera" class="primary" type="button" onclick="startLiveCamera(); return false;">Start live feed</button>
+            <button id="stopLiveCamera" class="secondary" type="button" onclick="stopLiveCamera(); return false;" disabled>Stop live feed</button>
             <span id="liveCameraStats" class="muted">640×480 · target 15 FPS</span>
           </div>
           <div class="camera-stage live-stage">
@@ -380,6 +380,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20261020-live3"></script>
 </body>
 </html>

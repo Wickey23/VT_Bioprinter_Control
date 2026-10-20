@@ -11,3 +11,6 @@
 
 .file-loader{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:18px 0}.file-loader input[type=file]{flex:1;min-width:220px;padding:9px;border:1px solid #d7dee9;border-radius:10px;background:#f8fafc}.expected-path-legend{display:flex;gap:12px;align-items:center;font-size:12px;color:#64748b}.expected-path-legend span{display:inline-flex;align-items:center;gap:5px}
 @media(max-width:700px){.sidebar nav{grid-template-columns:repeat(8,1fr)}.file-loader{align-items:stretch}.file-loader input,.file-loader button{width:100%}}
+
+.stacked-label{display:grid;gap:7px;font-size:12px;color:#64748b}.stacked-label input{padding:11px 12px;border:1px solid #d7dee9;border-radius:10px;font:inherit;color:#172033;background:#fff}.experiment-list{display:grid;gap:10px}.experiment-item{display:grid;grid-template-columns:1.4fr .8fr .7fr .7fr;gap:14px;align-items:center;padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.experiment-item strong{display:block}.experiment-item small{color:#64748b}.experiment-state{font-size:11px;font-weight:800;letter-spacing:.05em}.experiment-state.active{color:#166534}.experiment-state.complete{color:#475569}
+@media(max-width:700px){.sidebar nav{grid-template-columns:repeat(9,1fr)}.experiment-item{grid-template-columns:1fr 1fr}.experiment-item>div:first-child{grid-column:1/-1}}

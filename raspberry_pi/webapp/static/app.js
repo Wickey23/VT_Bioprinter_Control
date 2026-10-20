@@ -498,3 +498,7 @@ $("loginForm").onsubmit=async e=>{
   }
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);
 })();
+
+
+window.startLiveCamera=startLiveCamera;
+window.stopLiveCamera=stopLiveCamera;

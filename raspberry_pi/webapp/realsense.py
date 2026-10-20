@@ -67,6 +67,11 @@ class RealSenseLiveManager:
         self._color_resolution: str = "640x480"
         self._depth_resolution: str = "640x480"
         self._target_fps: int = 15
+        self._latest_depth_raw = None
+        self._depth_intrinsics = None
+        self._depth_scale: float | None = None
+        self._frame_width: int = 0
+        self._frame_height: int = 0
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -75,11 +80,14 @@ class RealSenseLiveManager:
                 "error": self._error,
                 "color_ready": self._latest_color_jpeg is not None,
                 "depth_ready": self._latest_depth_jpeg is not None,
+                "sample_ready": self._latest_depth_raw is not None and self._depth_intrinsics is not None,
                 "last_frame_at": self._last_frame_at,
                 "fps": round(self._fps, 1),
                 "stream": f"{self._view_mode} + depth",
                 "color_resolution": self._color_resolution,
                 "depth_resolution": self._depth_resolution,
+                "frame_width": self._frame_width,
+                "frame_height": self._frame_height,
                 "target_fps": self._target_fps,
             }
 
@@ -92,6 +100,11 @@ class RealSenseLiveManager:
             self._latest_color_jpeg = None
             self._latest_depth_jpeg = None
             self._latest_measurement = None
+            self._latest_depth_raw = None
+            self._depth_intrinsics = None
+            self._depth_scale = None
+            self._frame_width = 0
+            self._frame_height = 0
             self._last_frame_at = None
             self._thread = threading.Thread(
                 target=self._run,
@@ -114,12 +127,15 @@ class RealSenseLiveManager:
             "error": self._error,
             "color_ready": self._latest_color_jpeg is not None,
             "depth_ready": self._latest_depth_jpeg is not None,
+            "sample_ready": self._latest_depth_raw is not None and self._depth_intrinsics is not None,
             "last_frame_at": self._last_frame_at,
             "fps": round(self._fps, 1),
-            "stream": "RGB + depth",
-            "color_resolution": "640x480",
-            "depth_resolution": "848x480",
-            "target_fps": 15,
+            "stream": f"{self._view_mode} + depth",
+            "color_resolution": self._color_resolution,
+            "depth_resolution": self._depth_resolution,
+            "frame_width": self._frame_width,
+            "frame_height": self._frame_height,
+            "target_fps": self._target_fps,
         }
 
     def stop(self) -> dict[str, Any]:
@@ -140,6 +156,46 @@ class RealSenseLiveManager:
     def measurement(self) -> dict[str, Any] | None:
         with self._lock:
             return dict(self._latest_measurement) if self._latest_measurement else None
+
+
+    def sample_pixel(self, u: float, v: float, radius: int = 2) -> dict[str, Any]:
+        try:
+            import numpy as np
+            import pyrealsense2 as rs  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("RealSense Python bindings are unavailable.") from exc
+
+        with self._lock:
+            if self._latest_depth_raw is None or self._depth_intrinsics is None or self._depth_scale is None:
+                raise RuntimeError("No aligned live depth frame is available. Start the live camera first.")
+            depth_raw = self._latest_depth_raw.copy()
+            intrinsics = self._depth_intrinsics
+            scale = float(self._depth_scale)
+            width = int(self._frame_width)
+            height = int(self._frame_height)
+
+        if width <= 0 or height <= 0:
+            raise RuntimeError("Live camera frame geometry is unavailable.")
+
+        x = int(round(max(0, min(width - 1, float(u)))))
+        y = int(round(max(0, min(height - 1, float(v)))))
+        x0, x1 = max(0, x - radius), min(width, x + radius + 1)
+        y0, y1 = max(0, y - radius), min(height, y + radius + 1)
+        roi = depth_raw[y0:y1, x0:x1]
+        valid = roi[roi > 0]
+        if valid.size == 0:
+            raise RuntimeError("No valid depth return at the selected pixel.")
+
+        depth_m = float(np.median(valid) * scale)
+        point = rs.rs2_deproject_pixel_to_point(intrinsics, [float(x), float(y)], depth_m)
+        return {
+            "u": float(x),
+            "v": float(y),
+            "depth_m": round(depth_m, 6),
+            "camera_xyz_m": [round(float(value), 6) for value in point],
+            "frame_width": width,
+            "frame_height": height,
+        }
 
     def _run(self) -> None:
         pipeline = None
@@ -229,8 +285,14 @@ class RealSenseLiveManager:
             fps_window_start = time.monotonic()
             warmup = 6
 
+            align = rs.align(rs.stream.color) if kind == "color" else None
+
             while not self._stop.is_set():
                 frames = pipeline.wait_for_frames(3000)
+
+                if align is not None:
+                    frames = align.process(frames)
+
                 depth = frames.get_depth_frame()
 
                 if kind == "color":
@@ -257,6 +319,11 @@ class RealSenseLiveManager:
 
                 color_jpeg = _encode_jpeg(view_rgb, quality=82)
 
+                depth_raw = np.asanyarray(depth.get_data()).copy()
+                depth_profile = depth.profile.as_video_stream_profile()
+                depth_intrinsics = depth_profile.intrinsics
+                depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+
                 depth_color = colorizer.colorize(depth)
                 depth_arr = np.asanyarray(depth_color.get_data())
                 # Colorizer output is RGB8 in current librealsense builds.
@@ -279,6 +346,11 @@ class RealSenseLiveManager:
                     self._latest_color_jpeg = color_jpeg
                     self._latest_depth_jpeg = depth_jpeg
                     self._latest_measurement = measurement
+                    self._latest_depth_raw = depth_raw
+                    self._depth_intrinsics = depth_intrinsics
+                    self._depth_scale = float(depth_scale)
+                    self._frame_width = int(depth.get_width())
+                    self._frame_height = int(depth.get_height())
                     self._last_frame_at = now
                     self._fps = fps
 
@@ -358,6 +430,19 @@ def stop_live_camera() -> dict[str, Any]:
 
 def live_camera_status() -> dict[str, Any]:
     return LIVE_CAMERA.status()
+
+
+def sample_live_pixel(u: float, v: float, radius: int = 2) -> dict[str, Any]:
+    if not LIVE_CAMERA.status()["running"]:
+        status = LIVE_CAMERA.start()
+        if status.get("error"):
+            raise RuntimeError(status["error"])
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if LIVE_CAMERA.status().get("sample_ready"):
+            return LIVE_CAMERA.sample_pixel(u, v, radius=radius)
+        time.sleep(0.05)
+    raise RuntimeError("Timed out waiting for an aligned D405 depth frame.")
 
 
 def capture_color_jpeg() -> bytes:

@@ -3,7 +3,10 @@ const state={
   token:localStorage.getItem("vt_token")||"",
   ssid:"",
   commissioning:null,
-  depthObjectUrl:null
+  depthObjectUrl:null,
+  colorObjectUrl:null,
+  liveCamera:false,
+  liveGeneration:0
 };
 
 async function api(path,opts={}){
@@ -180,9 +183,108 @@ async function camera(){
       :c.usb_detected?"D405 hardware and RealSense SDK are ready.":"Connect the D405 to a blue USB 3 port on the Raspberry Pi.";
     $("measureDepth").disabled=!(c.usb_detected&&c.sdk_available);
     $("refreshDepthImage").disabled=!(c.usb_detected&&c.sdk_available);
+    $("startLiveCamera").disabled=!(c.usb_detected&&c.sdk_available);
+
+    if(c.live?.running){
+      state.liveCamera=true;
+      updateLiveControls(c.live);
+      if(!$("colorImage").classList.contains("visible")) runLiveCameraLoop();
+    }else{
+      updateLiveControls(c.live||{running:false,fps:0});
+    }
   }catch(err){
     pill($("cameraBadge"),false,"ERROR");
     $("cameraMessage").textContent=err.message;
+  }
+}
+
+function updateLiveControls(s){
+  const running=!!s.running;
+  pill($("liveCameraBadge"),running,running?"LIVE":"STOPPED");
+  $("startLiveCamera").disabled=running;
+  $("stopLiveCamera").disabled=!running;
+  const fps=Number(s.fps||0);
+  $("liveCameraStats").textContent=(s.color_resolution||"640x480")+" · "+(fps?fps.toFixed(1)+" FPS":"target 15 FPS");
+  if(s.error)$("cameraMessage").textContent="Live camera error: "+s.error;
+}
+
+async function syncLiveCameraStatus(){
+  const s=await api("/api/camera/live/status");
+  updateLiveControls(s);
+  return s;
+}
+
+async function startLiveCamera(){
+  $("cameraMessage").textContent="Starting D405 RGB + depth stream…";
+  try{
+    const s=await api("/api/camera/live/start",{method:"POST"});
+    state.liveCamera=true;
+    updateLiveControls(s);
+    $("cameraMessage").textContent="Live D405 feed is running. Depth measurements now use the same live pipeline.";
+    runLiveCameraLoop();
+  }catch(err){
+    state.liveCamera=false;
+    $("cameraMessage").textContent=err.message;
+    updateLiveControls({running:false,error:err.message});
+  }
+}
+
+async function stopLiveCamera(){
+  state.liveCamera=false;
+  state.liveGeneration++;
+  try{
+    const s=await api("/api/camera/live/stop",{method:"POST"});
+    updateLiveControls(s);
+  }catch(err){
+    $("cameraMessage").textContent=err.message;
+  }
+  if(state.colorObjectUrl){
+    URL.revokeObjectURL(state.colorObjectUrl);
+    state.colorObjectUrl=null;
+  }
+  $("colorImage").classList.remove("visible");
+  $("colorImage").removeAttribute("src");
+  $("colorPlaceholder").style.display="";
+  $("colorPlaceholder").textContent="Start the live feed to see the camera view.";
+}
+
+async function runLiveCameraLoop(){
+  if(!state.liveCamera)return;
+  const generation=++state.liveGeneration;
+  let frames=0;
+
+  while(state.liveCamera&&generation===state.liveGeneration){
+    const started=performance.now();
+    try{
+      const r=await fetch("/api/camera/color.jpg?ts="+Date.now(),{
+        headers:{"X-Bioprinter-Token":state.token},
+        cache:"no-store"
+      });
+      if(!r.ok){
+        const d=await r.json().catch(()=>({}));
+        throw new Error(d.detail||("HTTP "+r.status));
+      }
+      const blob=await r.blob();
+      const nextUrl=URL.createObjectURL(blob);
+      const previous=state.colorObjectUrl;
+      state.colorObjectUrl=nextUrl;
+      $("colorImage").src=nextUrl;
+      $("colorImage").classList.add("visible");
+      $("colorPlaceholder").style.display="none";
+      if(previous)URL.revokeObjectURL(previous);
+
+      frames++;
+      if(frames%10===0){
+        syncLiveCameraStatus().catch(()=>{});
+      }
+    }catch(err){
+      $("cameraMessage").textContent="Live feed error: "+err.message;
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+
+    const elapsed=performance.now()-started;
+    const delay=Math.max(0,90-elapsed);
+    if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
   }
 }
 
@@ -266,6 +368,10 @@ async function saved(){
 }
 
 function activatePage(page){
+  const current=document.querySelector(".nav-btn.active")?.dataset.page;
+  if(current==="camera"&&page!=="camera"&&state.liveCamera){
+    stopLiveCamera().catch(()=>{});
+  }
   document.querySelectorAll(".nav-btn,.page").forEach(x=>x.classList.remove("active"));
   const nav=document.querySelector('.nav-btn[data-page="'+page+'"]');
   if(nav)nav.classList.add("active");
@@ -306,6 +412,8 @@ $("emergencyStop").onclick=async()=>{
 $("refreshCamera").onclick=()=>camera();
 $("measureDepth").onclick=()=>measureDepth();
 $("refreshDepthImage").onclick=()=>refreshDepthImage();
+$("startLiveCamera").onclick=()=>startLiveCamera();
+$("stopLiveCamera").onclick=()=>stopLiveCamera();
 
 $("scanWifi").onclick=()=>scan().catch(e=>$("wifiList").innerHTML='<p class="error">'+esc(e.message)+'</p>');
 $("manualConnect").onclick=()=>{

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -36,7 +37,14 @@ from webapp.experiments import (
     start_experiment,
     stop_experiment,
 )
-from webapp.print_plan import clear_plan, load_plan, parse_gcode, project_plan
+from webapp.print_plan import (
+    clear_plan,
+    load_plan,
+    parse_gcode,
+    printer_to_camera,
+    project_camera_point,
+    project_plan,
+)
 from webapp.realsense import (
     capture_color_jpeg,
     capture_depth_jpeg,
@@ -358,6 +366,18 @@ def send_safe_command(command: str) -> dict[str, Any]:
 
 
 
+def parse_m114_response(lines: list[str]) -> dict[str, float]:
+    text = " ".join(lines)
+    result: dict[str, float] = {}
+    for axis in ("X", "Y", "Z", "E"):
+        match = re.search(rf"(?:^|\\s){axis}:\\s*(-?\\d+(?:\\.\\d+)?)", text)
+        if match:
+            result[axis.lower()] = float(match.group(1))
+    if not all(axis in result for axis in ("x", "y", "z")):
+        raise ValueError("Could not parse X/Y/Z from Marlin M114 response.")
+    return result
+
+
 def read_commissioning() -> dict[str, Any]:
     default = {
         "motors_connected": False,
@@ -598,6 +618,35 @@ def api_printer_status() -> dict[str, Any]:
 @app.post("/api/printer/command", dependencies=[Depends(require_token)])
 def api_printer_command(payload: SafeCommandRequest) -> dict[str, Any]:
     return send_safe_command(payload.command)
+
+
+@app.get("/api/monitor/printer-position", dependencies=[Depends(require_token)])
+def api_monitor_printer_position() -> dict[str, Any]:
+    result = send_safe_command("M114")
+    try:
+        position = parse_m114_response(result["response"])
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    projected = None
+    profile = load_profile()
+    if profile:
+        try:
+            camera_xyz = printer_to_camera(
+                profile,
+                [position["x"], position["y"], position["z"]],
+            )
+            projected = project_camera_point(profile, camera_xyz)
+        except Exception:
+            projected = None
+
+    return {
+        "position_mm": position,
+        "projected_pixel": projected,
+        "device": result.get("device"),
+        "raw": result.get("response"),
+        "note": "Firmware-reported position is only meaningful after the printer coordinate system has a known reference.",
+    }
 
 
 @app.get("/api/commissioning", dependencies=[Depends(require_token)])

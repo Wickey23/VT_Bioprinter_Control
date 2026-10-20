@@ -6,7 +6,16 @@ const state={
   depthObjectUrl:null,
   colorObjectUrl:null,
   liveCamera:false,
-  liveGeneration:0
+  liveGeneration:0,
+  calibrationProfile:null,
+  calibrationPoints:[],
+  calibrationMode:"bed",
+  calibrationObjectUrl:null,
+  calibrationSurface:null,
+  monitorActive:false,
+  monitorGeneration:0,
+  monitorObjectUrl:null,
+  monitorSurface:null
 };
 
 async function api(path,opts={}){
@@ -341,6 +350,504 @@ async function refreshDepthImage(){
   }
 }
 
+
+function canvasPoint(event,canvas){
+  const rect=canvas.getBoundingClientRect();
+  return {
+    u:(event.clientX-rect.left)/rect.width*canvas.width,
+    v:(event.clientY-rect.top)/rect.height*canvas.height
+  };
+}
+
+function drawMarker(ctx,u,v,label,fill="#fff"){
+  ctx.beginPath();
+  ctx.arc(u,v,7,0,Math.PI*2);
+  ctx.fillStyle=fill;
+  ctx.fill();
+  ctx.lineWidth=2;
+  ctx.strokeStyle="#0b1220";
+  ctx.stroke();
+  ctx.font="bold 14px system-ui";
+  ctx.fillStyle=fill;
+  ctx.strokeStyle="#0b1220";
+  ctx.lineWidth=4;
+  ctx.strokeText(label,u+10,v-10);
+  ctx.fillText(label,u+10,v-10);
+}
+
+function zColor(z){
+  const a=Math.abs(Number(z)||0);
+  if(a<=0.25)return "#22c55e";
+  if(a<=0.75)return "#eab308";
+  return "#ef4444";
+}
+
+function drawBedOverlay(canvas,profile,surface,nozzleOverride=null){
+  if(!canvas||!canvas.width||!canvas.height)return;
+  const ctx=canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const corners=profile?.bed?.corners||[];
+  if(corners.length===4){
+    ctx.beginPath();
+    ctx.moveTo(corners[0].u,corners[0].v);
+    for(let i=1;i<4;i++)ctx.lineTo(corners[i].u,corners[i].v);
+    ctx.closePath();
+    ctx.lineWidth=3;
+    ctx.strokeStyle="#22c55e";
+    ctx.stroke();
+    const labels=["FL","FR","RR","RL"];
+    corners.forEach((p,i)=>drawMarker(ctx,p.u,p.v,labels[i],"#22c55e"));
+  }
+
+  const nozzle=nozzleOverride||profile?.nozzle_reference;
+  if(nozzle?.pixel){
+    drawMarker(ctx,nozzle.pixel[0],nozzle.pixel[1],"NOZZLE","#e87722");
+  }
+
+  if(surface?.samples){
+    for(const point of surface.samples){
+      ctx.beginPath();
+      ctx.arc(point.u,point.v,4,0,Math.PI*2);
+      ctx.fillStyle=zColor(point.z_mm);
+      ctx.globalAlpha=.8;
+      ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+function drawCalibrationOverlay(){
+  const canvas=$("calibrationCanvas");
+  if(!canvas)return;
+  const ctx=canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const points=state.calibrationPoints;
+  if(points.length){
+    if(points.length>1){
+      ctx.beginPath();
+      ctx.moveTo(points[0].u,points[0].v);
+      for(let i=1;i<points.length;i++)ctx.lineTo(points[i].u,points[i].v);
+      if(points.length===4)ctx.closePath();
+      ctx.lineWidth=3;
+      ctx.strokeStyle="#22c55e";
+      ctx.stroke();
+    }
+    const labels=["1 FL","2 FR","3 RR","4 RL"];
+    points.forEach((point,index)=>drawMarker(ctx,point.u,point.v,labels[index],"#22c55e"));
+  }
+
+  const nozzle=state.calibrationProfile?.nozzle_reference;
+  if(nozzle?.pixel){
+    drawMarker(ctx,nozzle.pixel[0],nozzle.pixel[1],"NOZZLE","#e87722");
+  }
+
+  if(state.calibrationSurface?.samples){
+    for(const point of state.calibrationSurface.samples){
+      ctx.beginPath();
+      ctx.arc(point.u,point.v,4,0,Math.PI*2);
+      ctx.fillStyle=zColor(point.z_mm);
+      ctx.globalAlpha=.8;
+      ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+function updateCalibrationPointList(){
+  const names=["Front-left","Front-right","Rear-right","Rear-left"];
+  $("calibrationPointStatus").textContent=state.calibrationPoints.length+" / 4 POINTS";
+  $("solveCalibration").disabled=state.calibrationPoints.length!==4;
+  $("calibrationPointList").innerHTML=state.calibrationPoints.map((p,i)=>
+    '<div class="calibration-point"><strong>'+names[i]+'</strong>'+
+    'Pixel '+p.u.toFixed(1)+', '+p.v.toFixed(1)+'<br>'+
+    'Depth '+meters(p.depth_m)+'</div>'
+  ).join("");
+}
+
+function renderCalibrationProfile(profile){
+  state.calibrationProfile=profile||null;
+  const valid=!!profile;
+  pill($("calibrationBadge"),valid,valid?"CALIBRATED":"NOT CALIBRATED");
+  $("markNozzleTip").disabled=!valid;
+  $("analyzeCalibrationSurface").disabled=!valid;
+  $("monitorSurfaceScan").disabled=!valid;
+
+  if(!valid){
+    $("calibrationDetails").innerHTML='<div><span>Status</span><strong>No saved profile</strong></div>';
+    pill($("nozzleBadge"),false,"NOT SET");
+    $("nozzleDetails").innerHTML="";
+    $("calibrationMessage").textContent="Capture a camera frame, then click the four bed corners in printer-coordinate order.";
+    renderMonitorCalibration();
+    return;
+  }
+
+  const rms=profile.camera_to_printer?.rms_corner_error_mm;
+  $("calibrationDetails").innerHTML=[
+    ["Camera",profile.camera?.model||"D405"],
+    ["Serial",profile.camera?.serial||"—"],
+    ["Bed",Number(profile.bed?.width_mm).toFixed(1)+" × "+Number(profile.bed?.depth_mm).toFixed(1)+" mm"],
+    ["Corner-fit RMS",rms==null?"—":Number(rms).toFixed(3)+" mm"],
+    ["Transform",profile.camera_to_printer?.method||"—"]
+  ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+
+  $("calOriginX").value=profile.bed?.origin_x_mm??0;
+  $("calOriginY").value=profile.bed?.origin_y_mm??0;
+  $("calBedWidth").value=profile.bed?.width_mm??220;
+  $("calBedDepth").value=profile.bed?.depth_mm??220;
+
+  if(profile.nozzle_reference){
+    pill($("nozzleBadge"),true,"SET");
+    const xyz=profile.nozzle_reference.printer_xyz_mm;
+    $("nozzleDetails").innerHTML=[
+      ["X",xyz[0].toFixed(3)+" mm"],
+      ["Y",xyz[1].toFixed(3)+" mm"],
+      ["Z",xyz[2].toFixed(3)+" mm"]
+    ].map(x=>"<div><span>"+x[0]+"</span><strong>"+x[1]+"</strong></div>").join("");
+  }else{
+    pill($("nozzleBadge"),false,"NOT SET");
+    $("nozzleDetails").innerHTML='<div><span>Status</span><strong>Mark nozzle after bed calibration</strong></div>';
+  }
+
+  $("calibrationMessage").textContent="Calibration is saved. Keep the D405 rigidly mounted; moving the camera invalidates this transform.";
+  renderMonitorCalibration();
+}
+
+async function loadCalibration(){
+  const d=await api("/api/calibration");
+  renderCalibrationProfile(d.profile);
+  if(d.profile?.bed?.corners?.length===4 && state.calibrationPoints.length===0){
+    state.calibrationPoints=d.profile.bed.corners.map(p=>({...p}));
+    updateCalibrationPointList();
+    drawCalibrationOverlay();
+  }
+  return d.profile;
+}
+
+async function ensureCalibrationCamera(){
+  const s=await api("/api/camera/live/status");
+  if(!s.running){
+    const started=await api("/api/camera/live/start",{method:"POST"});
+    if(started.error)throw new Error(started.error);
+  }
+}
+
+async function fetchCameraBlob(path){
+  const r=await fetch(path+"?ts="+Date.now(),{
+    headers:{"X-Bioprinter-Token":state.token},
+    cache:"no-store"
+  });
+  if(!r.ok){
+    const d=await r.json().catch(()=>({}));
+    throw new Error(d.detail||("HTTP "+r.status));
+  }
+  return await r.blob();
+}
+
+async function captureCalibrationFrame(){
+  $("calibrationMessage").textContent="Starting D405 and capturing a calibration frame…";
+  try{
+    await ensureCalibrationCamera();
+    const blob=await fetchCameraBlob("/api/camera/color.jpg");
+    if(state.calibrationObjectUrl)URL.revokeObjectURL(state.calibrationObjectUrl);
+    state.calibrationObjectUrl=URL.createObjectURL(blob);
+    const img=$("calibrationImage");
+    img.onload=()=>{
+      const canvas=$("calibrationCanvas");
+      canvas.width=img.naturalWidth;
+      canvas.height=img.naturalHeight;
+      $("calibrationStage").classList.add("has-image");
+      drawCalibrationOverlay();
+    };
+    img.src=state.calibrationObjectUrl;
+    $("calibrationMessage").textContent=state.calibrationMode==="nozzle"
+      ?"Click the visible nozzle/syringe tip."
+      :"Click the four bed corners in order: front-left, front-right, rear-right, rear-left.";
+  }catch(err){
+    $("calibrationMessage").textContent="Calibration camera error: "+err.message;
+  }
+}
+
+async function calibrationCanvasClick(event){
+  const canvas=$("calibrationCanvas");
+  if(!canvas.width)return;
+  const point=canvasPoint(event,canvas);
+
+  if(state.calibrationMode==="nozzle"){
+    $("calibrationMessage").textContent="Measuring nozzle tip…";
+    try{
+      const d=await api("/api/calibration/nozzle",{
+        method:"POST",
+        body:JSON.stringify(point)
+      });
+      state.calibrationMode="bed";
+      renderCalibrationProfile(d.profile);
+      drawCalibrationOverlay();
+      $("calibrationMessage").textContent="Nozzle reference saved in printer coordinates.";
+    }catch(err){
+      $("calibrationMessage").textContent="Nozzle reference failed: "+err.message;
+    }
+    return;
+  }
+
+  if(state.calibrationPoints.length>=4)return;
+  $("calibrationMessage").textContent="Sampling depth at selected bed corner…";
+  try{
+    const sample=await api("/api/camera/pixel",{
+      method:"POST",
+      body:JSON.stringify(point)
+    });
+    state.calibrationPoints.push({
+      u:sample.u,
+      v:sample.v,
+      depth_m:sample.depth_m,
+      camera_xyz_m:sample.camera_xyz_m
+    });
+    state.calibrationSurface=null;
+    updateCalibrationPointList();
+    drawCalibrationOverlay();
+    const left=4-state.calibrationPoints.length;
+    $("calibrationMessage").textContent=left
+      ?left+" bed corner"+(left===1?"":"s")+" remaining."
+      :"All four corners captured. Verify bed dimensions, then solve calibration.";
+  }catch(err){
+    $("calibrationMessage").textContent="Point rejected: "+err.message;
+  }
+}
+
+async function solveCalibration(){
+  if(state.calibrationPoints.length!==4)return;
+  const img=$("calibrationImage");
+  const payload={
+    points:state.calibrationPoints,
+    origin_x_mm:Number($("calOriginX").value),
+    origin_y_mm:Number($("calOriginY").value),
+    width_mm:Number($("calBedWidth").value),
+    depth_mm:Number($("calBedDepth").value),
+    frame_width:img.naturalWidth||$("calibrationCanvas").width,
+    frame_height:img.naturalHeight||$("calibrationCanvas").height
+  };
+
+  $("calibrationMessage").textContent="Solving camera-to-printer 3D transform…";
+  try{
+    const d=await api("/api/calibration/solve",{
+      method:"POST",
+      body:JSON.stringify(payload)
+    });
+    renderCalibrationProfile(d.profile);
+    drawCalibrationOverlay();
+    $("calibrationMessage").textContent="Calibration solved and saved. RMS corner error: "+
+      Number(d.profile.camera_to_printer.rms_corner_error_mm).toFixed(3)+" mm.";
+  }catch(err){
+    $("calibrationMessage").textContent="Calibration failed: "+err.message;
+  }
+}
+
+async function clearCalibration(){
+  if(!confirm("Clear the saved camera-to-printer calibration?"))return;
+  await api("/api/calibration",{method:"DELETE"});
+  state.calibrationProfile=null;
+  state.calibrationPoints=[];
+  state.calibrationSurface=null;
+  state.calibrationMode="bed";
+  updateCalibrationPointList();
+  drawCalibrationOverlay();
+  renderCalibrationProfile(null);
+}
+
+function resetCalibrationPoints(){
+  state.calibrationPoints=[];
+  state.calibrationSurface=null;
+  state.calibrationMode="bed";
+  updateCalibrationPointList();
+  drawCalibrationOverlay();
+  $("calibrationMessage").textContent="Points reset. Click front-left, front-right, rear-right, then rear-left.";
+}
+
+function beginNozzleMark(){
+  if(!state.calibrationProfile)return;
+  state.calibrationMode="nozzle";
+  $("calibrationMessage").textContent="Nozzle-mark mode enabled. Capture a fresh frame if needed, then click the visible tip.";
+}
+
+function renderSurfaceMetrics(targetId,data){
+  const el=$(targetId);
+  if(!el)return;
+  if(!data){
+    el.innerHTML="";
+    return;
+  }
+  el.innerHTML=[
+    ["Samples",data.sample_count],
+    ["Mean Z",Number(data.mean_z_mm).toFixed(3)+" mm"],
+    ["RMS Z",Number(data.rms_z_mm).toFixed(3)+" mm"],
+    ["Peak-to-peak",Number(data.peak_to_peak_mm).toFixed(3)+" mm"]
+  ].map(x=>'<div><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join("");
+}
+
+async function analyzeCalibrationSurface(){
+  $("calibrationMessage").textContent="Sampling calibrated bed surface…";
+  try{
+    const d=await api("/api/calibration/surface",{
+      method:"POST",
+      body:JSON.stringify({columns:12,rows:9})
+    });
+    state.calibrationSurface=d;
+    renderSurfaceMetrics("surfaceMetrics",d);
+    pill($("surfaceBadge"),true,"SCANNED");
+    drawCalibrationOverlay();
+    $("calibrationMessage").textContent="Surface map captured. Green points are near Z=0; yellow/red indicate larger deviation.";
+  }catch(err){
+    pill($("surfaceBadge"),false,"ERROR");
+    $("calibrationMessage").textContent="Surface analysis failed: "+err.message;
+  }
+}
+
+function renderMonitorCalibration(){
+  const profile=state.calibrationProfile;
+  const target=$("monitorCalibrationDetails");
+  if(!target)return;
+  if(!profile){
+    target.innerHTML='<div><span>Status</span><strong>Calibration required</strong></div>';
+    $("monitorSurfaceScan").disabled=true;
+    return;
+  }
+
+  target.innerHTML=[
+    ["Status","VALID"],
+    ["RMS corner error",Number(profile.camera_to_printer?.rms_corner_error_mm||0).toFixed(3)+" mm"],
+    ["Bed",Number(profile.bed.width_mm).toFixed(1)+" × "+Number(profile.bed.depth_mm).toFixed(1)+" mm"],
+    ["Nozzle",profile.nozzle_reference?"Referenced":"Not marked"]
+  ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+  $("monitorSurfaceScan").disabled=false;
+}
+
+function setupCanvasForImage(img,canvas){
+  if(!img.naturalWidth||!img.naturalHeight)return;
+  if(canvas.width!==img.naturalWidth||canvas.height!==img.naturalHeight){
+    canvas.width=img.naturalWidth;
+    canvas.height=img.naturalHeight;
+  }
+}
+
+function drawMonitorOverlay(){
+  const canvas=$("monitorCanvas");
+  setupCanvasForImage($("monitorImage"),canvas);
+  drawBedOverlay(canvas,state.calibrationProfile,state.monitorSurface);
+}
+
+async function startMonitor(){
+  $("monitorMessage").textContent="Starting calibrated camera monitor…";
+  try{
+    await ensureCalibrationCamera();
+    state.monitorActive=true;
+    state.monitorGeneration++;
+    pill($("monitorCameraBadge"),true,"LIVE");
+    $("startMonitor").disabled=true;
+    $("stopMonitor").disabled=false;
+    $("monitorPlaceholder").style.display="none";
+    monitorLoop(state.monitorGeneration);
+    $("monitorMessage").textContent=state.calibrationProfile
+      ?"Observe mode active. Click the image to query printer X/Y/Z."
+      :"Camera is live, but calibration is required for printer coordinates.";
+  }catch(err){
+    state.monitorActive=false;
+    pill($("monitorCameraBadge"),false,"ERROR");
+    $("monitorMessage").textContent=err.message;
+  }
+}
+
+async function stopMonitor(){
+  state.monitorActive=false;
+  state.monitorGeneration++;
+  try{await api("/api/camera/live/stop",{method:"POST"});}catch(_){}
+  pill($("monitorCameraBadge"),false,"STOPPED");
+  $("startMonitor").disabled=false;
+  $("stopMonitor").disabled=true;
+  if(state.monitorObjectUrl){
+    URL.revokeObjectURL(state.monitorObjectUrl);
+    state.monitorObjectUrl=null;
+  }
+  $("monitorImage").removeAttribute("src");
+  $("monitorPlaceholder").style.display="";
+  $("monitorPlaceholder").textContent="Start the monitor to view calibrated printer coordinates.";
+}
+
+async function monitorLoop(generation){
+  while(state.monitorActive&&generation===state.monitorGeneration){
+    const started=performance.now();
+    try{
+      const blob=await fetchCameraBlob("/api/camera/color.jpg");
+      const url=URL.createObjectURL(blob);
+      const old=state.monitorObjectUrl;
+      state.monitorObjectUrl=url;
+      const img=$("monitorImage");
+      img.onload=()=>{
+        setupCanvasForImage(img,$("monitorCanvas"));
+        drawMonitorOverlay();
+      };
+      img.src=url;
+      if(old)URL.revokeObjectURL(old);
+    }catch(err){
+      $("monitorMessage").textContent="Monitor frame error: "+err.message;
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+    const delay=Math.max(0,120-(performance.now()-started));
+    if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+  }
+}
+
+async function monitorCanvasClick(event){
+  if(!state.monitorActive)return;
+  const canvas=$("monitorCanvas");
+  const point=canvasPoint(event,canvas);
+  $("monitorMessage").textContent="Sampling 3D point…";
+  try{
+    const d=await api("/api/camera/pixel",{
+      method:"POST",
+      body:JSON.stringify(point)
+    });
+    $("monitorDepth").textContent=meters(d.depth_m);
+    if(d.printer_xyz_mm){
+      $("monitorX").textContent=Number(d.printer_xyz_mm[0]).toFixed(2)+" mm";
+      $("monitorY").textContent=Number(d.printer_xyz_mm[1]).toFixed(2)+" mm";
+      $("monitorZ").textContent=Number(d.printer_xyz_mm[2]).toFixed(2)+" mm";
+      $("monitorMessage").textContent="Point converted from D405 depth into printer coordinates.";
+    }else{
+      $("monitorX").textContent="—";
+      $("monitorY").textContent="—";
+      $("monitorZ").textContent="—";
+      $("monitorMessage").textContent="Depth measured, but camera-to-printer calibration is not available.";
+    }
+  }catch(err){
+    $("monitorMessage").textContent="Coordinate sample failed: "+err.message;
+  }
+}
+
+async function analyzeMonitorSurface(){
+  $("monitorMessage").textContent="Scanning calibrated surface…";
+  try{
+    const d=await api("/api/calibration/surface",{
+      method:"POST",
+      body:JSON.stringify({columns:14,rows:10})
+    });
+    state.monitorSurface=d;
+    $("monitorSurfaceDetails").innerHTML=[
+      ["Samples",d.sample_count],
+      ["Mean Z",Number(d.mean_z_mm).toFixed(3)+" mm"],
+      ["RMS Z",Number(d.rms_z_mm).toFixed(3)+" mm"],
+      ["Minimum",Number(d.min_z_mm).toFixed(3)+" mm"],
+      ["Maximum",Number(d.max_z_mm).toFixed(3)+" mm"],
+      ["Peak-to-peak",Number(d.peak_to_peak_mm).toFixed(3)+" mm"]
+    ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+    drawMonitorOverlay();
+    $("monitorMessage").textContent="Surface scan complete. Overlay points are colored by Z deviation.";
+  }catch(err){
+    $("monitorMessage").textContent="Surface scan failed: "+err.message;
+  }
+}
+
 async function hotspot(){
   const h=await api("/api/network/hotspot");
   $("hotspotSsid").textContent=h.ssid;
@@ -388,14 +895,24 @@ function activatePage(page){
   if(current==="camera"&&page!=="camera"&&state.liveCamera){
     stopLiveCamera().catch(()=>{});
   }
+  if(current==="monitor"&&page!=="monitor"&&state.monitorActive){
+    stopMonitor().catch(()=>{});
+  }
+  if(current==="calibration"&&!["calibration","camera","monitor"].includes(page)){
+    api("/api/camera/live/stop",{method:"POST"}).catch(()=>{});
+  }
+
   document.querySelectorAll(".nav-btn,.page").forEach(x=>x.classList.remove("active"));
   const nav=document.querySelector('.nav-btn[data-page="'+page+'"]');
   if(nav)nav.classList.add("active");
   $("page-"+page).classList.add("active");
   $("pageTitle").textContent=page[0].toUpperCase()+page.slice(1);
+
   if(page==="network"){saved().catch(()=>{});hotspot().catch(()=>{})}
   if(page==="printer"){printer().catch(()=>{});loadCommissioning().catch(()=>{})}
   if(page==="camera"){camera().catch(()=>{})}
+  if(page==="calibration"){loadCalibration().catch(()=>{})}
+  if(page==="monitor"){loadCalibration().then(renderMonitorCalibration).catch(()=>{})}
 }
 
 document.querySelectorAll(".nav-btn").forEach(b=>b.onclick=()=>activatePage(b.dataset.page));
@@ -430,6 +947,19 @@ $("measureDepth").onclick=()=>measureDepth();
 $("refreshDepthImage").onclick=()=>refreshDepthImage();
 $("startLiveCamera").onclick=()=>startLiveCamera();
 $("stopLiveCamera").onclick=()=>stopLiveCamera();
+
+$("captureCalibrationFrame").onclick=()=>captureCalibrationFrame();
+$("resetCalibrationPoints").onclick=()=>resetCalibrationPoints();
+$("solveCalibration").onclick=()=>solveCalibration();
+$("clearCalibration").onclick=()=>clearCalibration().catch(e=>$("calibrationMessage").textContent=e.message);
+$("markNozzleTip").onclick=()=>beginNozzleMark();
+$("analyzeCalibrationSurface").onclick=()=>analyzeCalibrationSurface();
+$("calibrationCanvas").onclick=e=>calibrationCanvasClick(e);
+
+$("startMonitor").onclick=()=>startMonitor();
+$("stopMonitor").onclick=()=>stopMonitor();
+$("monitorSurfaceScan").onclick=()=>analyzeMonitorSurface();
+$("monitorCanvas").onclick=e=>monitorCanvasClick(e);
 
 $("scanWifi").onclick=()=>scan().catch(e=>$("wifiList").innerHTML='<p class="error">'+esc(e.message)+'</p>');
 $("manualConnect").onclick=()=>{
@@ -493,7 +1023,7 @@ $("loginForm").onsubmit=async e=>{
     try{
       await api("/api/status");
       $("loginOverlay").classList.add("hidden");
-      await Promise.allSettled([status(),printer(),camera(),loadCommissioning()]);
+      await Promise.allSettled([status(),printer(),camera(),loadCommissioning(),loadCalibration()]);
     }catch{}
   }
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);

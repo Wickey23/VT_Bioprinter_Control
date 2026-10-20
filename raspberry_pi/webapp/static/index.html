@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -12,7 +13,7 @@
     <form id="loginForm" class="login-card">
       <div class="brand-mark">VT</div>
       <h1>Bioprinter Controller</h1>
-      <p>Enter the controller access key shown during installation.</p>
+      <p>Enter the controller access key.</p>
       <input id="tokenInput" type="password" autocomplete="current-password" placeholder="Controller access key" required />
       <button class="primary" type="submit">Open Controller</button>
       <div id="loginError" class="error"></div>
@@ -31,6 +32,7 @@
       <nav>
         <button class="nav-btn active" data-page="dashboard">Dashboard</button>
         <button class="nav-btn" data-page="printer">Printer</button>
+        <button class="nav-btn" data-page="camera">Camera</button>
         <button class="nav-btn" data-page="network">Network</button>
         <button class="nav-btn" data-page="system">System</button>
       </nav>
@@ -71,14 +73,14 @@
             <small id="printerDevice">—</small>
           </article>
           <article class="card metric">
+            <span>RealSense</span>
+            <strong id="cameraState">—</strong>
+            <small id="cameraModel">—</small>
+          </article>
+          <article class="card metric">
             <span>Wi-Fi</span>
             <strong id="wifiState">—</strong>
             <small id="wifiIp">—</small>
-          </article>
-          <article class="card metric">
-            <span>CPU</span>
-            <strong id="cpuTemp">—</strong>
-            <small>Raspberry Pi temperature</small>
           </article>
         </div>
 
@@ -87,36 +89,27 @@
             <div class="card-title">
               <div>
                 <p class="eyebrow">Printer safety</p>
-                <h3>Commissioning lock</h3>
+                <h3>Commissioning state</h3>
               </div>
-              <span class="lock-badge">LOCKED</span>
+              <span id="dashboardLockBadge" class="lock-badge">LOCKED</span>
             </div>
-            <p>Motion, homing, extrusion, and arbitrary G-code stay disabled until motor directions and endstops are physically verified in the lab.</p>
-            <div class="locked-controls">
-              <button disabled>Home X</button>
-              <button disabled>Home Y</button>
-              <button disabled>Home Z</button>
-              <button disabled>Jog</button>
-              <button disabled>Extrude</button>
-            </div>
+            <p id="commissioningSummary">Motion remains disabled until the physical commissioning checklist is complete.</p>
+            <button class="secondary nav-jump" data-target="printer">Open printer commissioning</button>
           </article>
 
           <article class="card">
             <div class="card-title">
               <div>
-                <p class="eyebrow">Storage</p>
-                <h3>Host capacity</h3>
+                <p class="eyebrow">Host</p>
+                <h3>Pi health</h3>
               </div>
             </div>
-            <div class="storage-row">
-              <span>Used</span>
-              <strong id="diskUsed">—</strong>
+            <div class="detail-list">
+              <div><span>CPU temperature</span><strong id="cpuTemp">—</strong></div>
+              <div><span>Storage used</span><strong id="diskUsed">—</strong></div>
+              <div><span>Storage free</span><strong id="diskFree">—</strong></div>
             </div>
             <div class="progress"><div id="diskBar"></div></div>
-            <div class="storage-row muted">
-              <span>Free</span>
-              <span id="diskFree">—</span>
-            </div>
           </article>
         </div>
       </section>
@@ -157,31 +150,114 @@
         <article class="card">
           <div class="card-title">
             <div>
-              <p class="eyebrow">Future controls</p>
-              <h3>Motion & syringe control</h3>
+              <p class="eyebrow">Commissioning gate</p>
+              <h3>Enable tiny jog tests</h3>
             </div>
-            <span class="lock-badge">COMMISSIONING REQUIRED</span>
+            <span id="commissioningBadge" class="lock-badge">LOCKED</span>
+          </div>
+          <p>Confirm each physical item before motion is enabled. This does not replace a physical power stop.</p>
+          <div class="checklist" id="commissioningChecklist">
+            <label><input type="checkbox" data-key="motors_connected"> X/Y/Z motors are connected to the intended outputs</label>
+            <label><input type="checkbox" data-key="endstops_verified"> X/Y/Z endstop states were physically verified with M119</label>
+            <label><input type="checkbox" data-key="workspace_clear"> Tooling, syringes, hands, and cables are clear of moving parts</label>
+            <label><input type="checkbox" data-key="main_power_ready"> Printer main PSU is powered and ready for stepper motion</label>
+            <label><input type="checkbox" data-key="physical_stop_ready"> Physical power-off / emergency stop is immediately reachable</label>
+          </div>
+          <div class="locked-controls">
+            <button id="saveCommissioning" class="primary">Save commissioning state</button>
+            <button id="lockMotion" class="danger-outline">Lock motion</button>
+          </div>
+          <p id="commissioningMessage" class="muted"></p>
+        </article>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Commissioning motion</p>
+              <h3>Controlled X / Y / Z jog</h3>
+            </div>
+            <span id="motionBadge" class="lock-badge">LOCKED</span>
+          </div>
+          <div class="jog-toolbar">
+            <label>Step
+              <select id="jogStep">
+                <option value="0.1">0.1 mm</option>
+                <option value="1" selected>1.0 mm</option>
+              </select>
+            </label>
+            <span class="muted">Feed: 300 mm/min</span>
           </div>
           <div class="control-preview">
             <div class="axis-pad">
-              <button disabled>+Y</button>
+              <button class="jog-btn" data-axis="Y" data-sign="1" disabled>+Y</button>
               <div>
-                <button disabled>−X</button>
-                <button disabled>HOME</button>
-                <button disabled>+X</button>
+                <button class="jog-btn" data-axis="X" data-sign="-1" disabled>−X</button>
+                <span class="axis-center">XY</span>
+                <button class="jog-btn" data-axis="X" data-sign="1" disabled>+X</button>
               </div>
-              <button disabled>−Y</button>
+              <button class="jog-btn" data-axis="Y" data-sign="-1" disabled>−Y</button>
             </div>
             <div class="z-controls">
-              <button disabled>Z +</button>
-              <button disabled>Z −</button>
+              <button class="jog-btn" data-axis="Z" data-sign="1" disabled>Z +</button>
+              <button class="jog-btn" data-axis="Z" data-sign="-1" disabled>Z −</button>
             </div>
             <div class="syringe-controls">
-              <label>Syringe amount</label>
-              <input disabled value="1.0 mL" />
+              <strong>Syringe control</strong>
+              <span class="muted">Still locked until syringe driver mapping and calibration are verified.</span>
               <button disabled>Extrude</button>
               <button disabled>Retract</button>
             </div>
+          </div>
+          <div class="emergency-row">
+            <button id="emergencyStop" class="emergency">SEND M112 EMERGENCY STOP</button>
+            <span>This is a software stop. Cut printer power for a hardware emergency.</span>
+          </div>
+          <pre id="motionLog">No motion commands sent.</pre>
+        </article>
+      </section>
+
+      <section id="page-camera" class="page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Intel RealSense D405</p>
+                <h3>Depth camera</h3>
+              </div>
+              <span id="cameraBadge" class="pill">CHECKING</span>
+            </div>
+            <div id="cameraDetails" class="detail-list"></div>
+            <div class="locked-controls">
+              <button id="refreshCamera" class="secondary">Refresh camera</button>
+              <button id="measureDepth" class="primary">Measure depth</button>
+            </div>
+            <p id="cameraMessage" class="muted"></p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Center sensing</p>
+            <h3>Depth measurement</h3>
+            <div class="sensor-grid">
+              <div><span>Center</span><strong id="depthCenter">—</strong></div>
+              <div><span>ROI median</span><strong id="depthMedian">—</strong></div>
+              <div><span>ROI min</span><strong id="depthMin">—</strong></div>
+              <div><span>ROI max</span><strong id="depthMax">—</strong></div>
+            </div>
+            <p class="muted">Initial sensing uses the center 21×21 pixel region. This is a commissioning measurement, not yet a calibrated nozzle-to-bed measurement.</p>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Depth visualization</p>
+              <h3>Latest D405 frame</h3>
+            </div>
+            <button id="refreshDepthImage" class="secondary">Capture frame</button>
+          </div>
+          <div class="camera-stage">
+            <img id="depthImage" alt="RealSense D405 depth visualization" />
+            <div id="depthPlaceholder">No depth frame captured yet.</div>
           </div>
         </article>
       </section>
@@ -228,7 +304,7 @@
             <div><span>Wi-Fi password</span><strong id="hotspotPassword">bioprinter</strong></div>
             <div><span>Controller address</span><strong id="hotspotUrl">http://10.42.0.1:8080</strong></div>
           </div>
-          <div class="notice">If the Pi cannot join normal Wi-Fi after boot, it automatically starts this network. You can also start it manually below.</div>
+          <div class="notice">If the Pi cannot join normal Wi-Fi after boot, it automatically starts this network.</div>
           <div class="locked-controls">
             <button id="hotspotOn" class="secondary">Start setup hotspot</button>
           </div>

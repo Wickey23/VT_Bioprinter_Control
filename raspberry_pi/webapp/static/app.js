@@ -15,7 +15,9 @@ const state={
   monitorActive:false,
   monitorGeneration:0,
   monitorObjectUrl:null,
-  monitorSurface:null
+  monitorSurface:null,
+  planSummary:null,
+  projectedPlan:null
 };
 
 async function api(path,opts={}){
@@ -639,6 +641,7 @@ async function solveCalibration(){
     drawCalibrationOverlay();
     $("calibrationMessage").textContent="Calibration solved and saved. RMS corner error: "+
       Number(d.profile.camera_to_printer.rms_corner_error_mm).toFixed(3)+" mm.";
+    if(state.planSummary)loadProjectedPlan().catch(()=>{});
   }catch(err){
     $("calibrationMessage").textContent="Calibration failed: "+err.message;
   }
@@ -735,6 +738,21 @@ function drawMonitorOverlay(){
   const canvas=$("monitorCanvas");
   setupCanvasForImage($("monitorImage"),canvas);
   drawBedOverlay(canvas,state.calibrationProfile,state.monitorSurface);
+
+  if(state.projectedPlan?.segments?.length){
+    const ctx=canvas.getContext("2d");
+    ctx.save();
+    ctx.strokeStyle="#38bdf8";
+    ctx.lineWidth=2;
+    ctx.globalAlpha=.65;
+    ctx.beginPath();
+    for(const segment of state.projectedPlan.segments){
+      ctx.moveTo(segment.start[0],segment.start[1]);
+      ctx.lineTo(segment.end[0],segment.end[1]);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 async function startMonitor(){
@@ -848,6 +866,93 @@ async function analyzeMonitorSurface(){
   }
 }
 
+
+function renderPlan(plan){
+  state.planSummary=plan||null;
+  const loaded=!!plan;
+  pill($("planBadge"),loaded,loaded?"PLAN LOADED":"NO PLAN");
+
+  if(!loaded){
+    $("planDetails").innerHTML='<div><span>Status</span><strong>No G-code loaded</strong></div>';
+    $("planMessage").textContent="No print plan loaded.";
+    state.projectedPlan=null;
+    drawMonitorOverlay();
+    return;
+  }
+
+  const min=plan.bounds_mm?.min||[0,0,0];
+  const max=plan.bounds_mm?.max||[0,0,0];
+  $("planDetails").innerHTML=[
+    ["File",plan.filename||"—"],
+    ["Segments",plan.segment_count],
+    ["Extruding segments",plan.extruding_segment_count],
+    ["Estimated layers",plan.layer_count_estimate],
+    ["Motion",Number(plan.total_motion_mm||0).toFixed(1)+" mm"],
+    ["Extruding path",Number(plan.extruding_motion_mm||0).toFixed(1)+" mm"],
+    ["X range",Number(min[0]).toFixed(1)+" → "+Number(max[0]).toFixed(1)+" mm"],
+    ["Y range",Number(min[1]).toFixed(1)+" → "+Number(max[1]).toFixed(1)+" mm"],
+    ["Z range",Number(min[2]).toFixed(1)+" → "+Number(max[2]).toFixed(1)+" mm"]
+  ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+
+  $("planMessage").textContent="Plan parsed. It will appear as the expected extrusion path in Monitor after camera calibration.";
+}
+
+async function loadPlan(){
+  const d=await api("/api/plan");
+  renderPlan(d.plan);
+  if(d.loaded&&state.calibrationProfile){
+    await loadProjectedPlan().catch(()=>{});
+  }
+  return d.plan;
+}
+
+async function loadProjectedPlan(){
+  if(!state.planSummary||!state.calibrationProfile){
+    state.projectedPlan=null;
+    drawMonitorOverlay();
+    return null;
+  }
+  const d=await api("/api/plan/projected");
+  state.projectedPlan=d;
+  drawMonitorOverlay();
+  if($("monitorMessage")&&state.monitorActive){
+    $("monitorMessage").textContent="Observe mode active. Cyan overlay = expected extruding G-code path. Click the image to query printer X/Y/Z.";
+  }
+  return d;
+}
+
+async function loadGcodeFile(){
+  const file=$("gcodeFile").files?.[0];
+  if(!file){
+    $("planMessage").textContent="Choose a G-code file first.";
+    return;
+  }
+
+  $("planMessage").textContent="Reading and parsing "+file.name+"…";
+  $("loadGcode").disabled=true;
+  try{
+    const text=await file.text();
+    const d=await api("/api/plan",{
+      method:"POST",
+      body:JSON.stringify({filename:file.name,text})
+    });
+    renderPlan(d.plan);
+    if(state.calibrationProfile)await loadProjectedPlan();
+    $("planMessage").textContent="G-code parsed successfully. Expected extrusion geometry is ready for Monitor.";
+  }catch(err){
+    $("planMessage").textContent="G-code load failed: "+err.message;
+  }finally{
+    $("loadGcode").disabled=false;
+  }
+}
+
+async function clearGcode(){
+  if(!confirm("Clear the active G-code print plan?"))return;
+  await api("/api/plan",{method:"DELETE"});
+  state.projectedPlan=null;
+  renderPlan(null);
+}
+
 async function hotspot(){
   const h=await api("/api/network/hotspot");
   $("hotspotSsid").textContent=h.ssid;
@@ -912,7 +1017,10 @@ function activatePage(page){
   if(page==="printer"){printer().catch(()=>{});loadCommissioning().catch(()=>{})}
   if(page==="camera"){camera().catch(()=>{})}
   if(page==="calibration"){loadCalibration().catch(()=>{})}
-  if(page==="monitor"){loadCalibration().then(renderMonitorCalibration).catch(()=>{})}
+  if(page==="monitor"){
+    Promise.allSettled([loadCalibration(),loadPlan()]).then(()=>loadProjectedPlan().catch(()=>{}));
+  }
+  if(page==="print"){loadPlan().catch(()=>{})}
 }
 
 document.querySelectorAll(".nav-btn").forEach(b=>b.onclick=()=>activatePage(b.dataset.page));
@@ -960,6 +1068,9 @@ $("startMonitor").onclick=()=>startMonitor();
 $("stopMonitor").onclick=()=>stopMonitor();
 $("monitorSurfaceScan").onclick=()=>analyzeMonitorSurface();
 $("monitorCanvas").onclick=e=>monitorCanvasClick(e);
+
+$("loadGcode").onclick=()=>loadGcodeFile();
+$("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
 
 $("scanWifi").onclick=()=>scan().catch(e=>$("wifiList").innerHTML='<p class="error">'+esc(e.message)+'</p>');
 $("manualConnect").onclick=()=>{
@@ -1023,7 +1134,7 @@ $("loginForm").onsubmit=async e=>{
     try{
       await api("/api/status");
       $("loginOverlay").classList.add("hidden");
-      await Promise.allSettled([status(),printer(),camera(),loadCommissioning(),loadCalibration()]);
+      await Promise.allSettled([status(),printer(),camera(),loadCommissioning(),loadCalibration(),loadPlan()]);
     }catch{}
   }
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);

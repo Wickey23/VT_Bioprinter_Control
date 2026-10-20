@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import shutil
@@ -12,15 +13,18 @@ from typing import Any
 
 import serial
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from serial.tools import list_ports
+
+from webapp.realsense import capture_depth_jpeg, capture_depth_sample, usb_camera_status
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 CONFIG_DIR = Path(os.environ.get("VT_BIOPRINTER_CONFIG_DIR", Path.home() / ".config" / "vt-bioprinter"))
 TOKEN_FILE = CONFIG_DIR / "token"
+COMMISSION_FILE = CONFIG_DIR / "commissioning.json"
 NETWORK_HELPER = Path(os.environ.get("VT_BIOPRINTER_NETWORK_HELPER", "/usr/local/sbin/vt-bioprinter-network"))
 
 BAUD = 115200
@@ -46,6 +50,20 @@ class WifiForgetRequest(BaseModel):
 
 class SafeCommandRequest(BaseModel):
     command: str = Field(min_length=1, max_length=64)
+
+
+class CommissioningRequest(BaseModel):
+    motors_connected: bool
+    endstops_verified: bool
+    workspace_clear: bool
+    main_power_ready: bool
+    physical_stop_ready: bool
+
+
+class JogRequest(BaseModel):
+    axis: str = Field(pattern="^[XYZ]$")
+    distance_mm: float
+    feed_mm_min: int = Field(default=300, ge=60, le=1200)
 
 
 def load_token() -> str:
@@ -272,6 +290,105 @@ def send_safe_command(command: str) -> dict[str, Any]:
     return {"command": normalized, "device": target["device"], "response": lines}
 
 
+
+def read_commissioning() -> dict[str, Any]:
+    default = {
+        "motors_connected": False,
+        "endstops_verified": False,
+        "workspace_clear": False,
+        "main_power_ready": False,
+        "physical_stop_ready": False,
+        "unlocked": False,
+    }
+    try:
+        data = json.loads(COMMISSION_FILE.read_text(encoding="utf-8"))
+        default.update({k: bool(data.get(k, False)) for k in default})
+    except Exception:
+        pass
+    default["unlocked"] = all(
+        default[key]
+        for key in (
+            "motors_connected",
+            "endstops_verified",
+            "workspace_clear",
+            "main_power_ready",
+            "physical_stop_ready",
+        )
+    )
+    return default
+
+
+def save_commissioning(payload: CommissioningRequest) -> dict[str, Any]:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    data = payload.model_dump()
+    data["unlocked"] = all(data.values())
+    COMMISSION_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return data
+
+
+def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, Any]:
+    state = read_commissioning()
+    if not state["unlocked"]:
+        raise HTTPException(status_code=423, detail="Motion is locked until the commissioning checklist is complete.")
+
+    if abs(distance_mm) not in (0.1, 1.0):
+        raise HTTPException(status_code=400, detail="Commissioning jogs are limited to 0.1 mm or 1.0 mm.")
+
+    target = chosen_printer()
+    if not target:
+        raise HTTPException(status_code=409, detail="No high-confidence Creality/CH340 serial interface is connected.")
+
+    commands = ["G91", f"G0 {axis}{distance_mm:g} F{feed_mm_min}", "G90"]
+    responses: list[str] = []
+    try:
+        with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+            time.sleep(1.0)
+            port.reset_input_buffer()
+            port.write(b"\n")
+            port.flush()
+            time.sleep(0.35)
+            port.reset_input_buffer()
+
+            for command in commands:
+                port.write((command + "\n").encode("ascii"))
+                port.flush()
+                deadline = time.monotonic() + 4.0
+                while time.monotonic() < deadline:
+                    raw = port.readline()
+                    if not raw:
+                        continue
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    responses.append(f"{command}: {line}")
+                    if line == "ok" or line.startswith("Error:"):
+                        break
+    except (serial.SerialException, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
+
+    return {
+        "ok": True,
+        "axis": axis,
+        "distance_mm": distance_mm,
+        "feed_mm_min": feed_mm_min,
+        "response": responses,
+    }
+
+
+def emergency_stop() -> dict[str, Any]:
+    target = chosen_printer()
+    if not target:
+        raise HTTPException(status_code=409, detail="Printer serial interface is not connected.")
+    try:
+        with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+            time.sleep(0.2)
+            port.write(b"M112\n")
+            port.flush()
+    except (serial.SerialException, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
+    return {"ok": True, "message": "Marlin emergency-stop command sent. Use the physical power stop for a hardware emergency."}
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -313,8 +430,9 @@ def status() -> dict[str, Any]:
             "connected": printer is not None,
             "device": printer["device"] if printer else None,
             "description": printer["description"] if printer else None,
-            "commissioning_locked": True,
+            "commissioning_locked": not read_commissioning()["unlocked"],
         },
+        "camera": usb_camera_status(),
     }
 
 
@@ -403,7 +521,7 @@ def api_printer_status() -> dict[str, Any]:
         "connected": selected is not None,
         "selected": selected,
         "candidates": ports,
-        "commissioning_locked": True,
+        "commissioning_locked": not read_commissioning()["unlocked"],
         "allowed_commands": sorted(SAFE_COMMANDS),
     }
 
@@ -411,6 +529,48 @@ def api_printer_status() -> dict[str, Any]:
 @app.post("/api/printer/command", dependencies=[Depends(require_token)])
 def api_printer_command(payload: SafeCommandRequest) -> dict[str, Any]:
     return send_safe_command(payload.command)
+
+
+@app.get("/api/commissioning", dependencies=[Depends(require_token)])
+def api_commissioning_status() -> dict[str, Any]:
+    return read_commissioning()
+
+
+@app.post("/api/commissioning", dependencies=[Depends(require_token)])
+def api_commissioning_update(payload: CommissioningRequest) -> dict[str, Any]:
+    return save_commissioning(payload)
+
+
+@app.post("/api/printer/jog", dependencies=[Depends(require_token)])
+def api_printer_jog(payload: JogRequest) -> dict[str, Any]:
+    return serial_motion(payload.axis, payload.distance_mm, payload.feed_mm_min)
+
+
+@app.post("/api/printer/emergency-stop", dependencies=[Depends(require_token)])
+def api_printer_emergency_stop() -> dict[str, Any]:
+    return emergency_stop()
+
+
+@app.get("/api/camera/status", dependencies=[Depends(require_token)])
+def api_camera_status() -> dict[str, Any]:
+    return usb_camera_status()
+
+
+@app.get("/api/camera/measure", dependencies=[Depends(require_token)])
+def api_camera_measure() -> dict[str, Any]:
+    try:
+        return capture_depth_sample()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.get("/api/camera/depth.jpg", dependencies=[Depends(require_token)])
+def api_camera_depth_image() -> Response:
+    try:
+        data = capture_depth_jpeg()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.exception_handler(subprocess.TimeoutExpired)

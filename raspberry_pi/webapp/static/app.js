@@ -412,7 +412,7 @@ function drawBedOverlay(canvas,profile,surface,nozzleOverride=null){
     for(const point of surface.samples){
       ctx.beginPath();
       ctx.arc(point.u,point.v,4,0,Math.PI*2);
-      ctx.fillStyle=zColor(point.z_mm);
+      ctx.fillStyle=zColor(point.delta_z_mm??point.z_mm);
       ctx.globalAlpha=.8;
       ctx.fill();
       ctx.globalAlpha=1;
@@ -450,7 +450,7 @@ function drawCalibrationOverlay(){
     for(const point of state.calibrationSurface.samples){
       ctx.beginPath();
       ctx.arc(point.u,point.v,4,0,Math.PI*2);
-      ctx.fillStyle=zColor(point.z_mm);
+      ctx.fillStyle=zColor(point.delta_z_mm??point.z_mm);
       ctx.globalAlpha=.8;
       ctx.fill();
       ctx.globalAlpha=1;
@@ -475,6 +475,7 @@ function renderCalibrationProfile(profile){
   pill($("calibrationBadge"),valid,valid?"CALIBRATED":"NOT CALIBRATED");
   $("markNozzleTip").disabled=!valid;
   $("analyzeCalibrationSurface").disabled=!valid;
+  $("saveSurfaceBaseline").disabled=!(valid&&state.calibrationSurface);
   $("monitorSurfaceScan").disabled=!valid;
 
   if(!valid){
@@ -492,7 +493,8 @@ function renderCalibrationProfile(profile){
     ["Serial",profile.camera?.serial||"—"],
     ["Bed",Number(profile.bed?.width_mm).toFixed(1)+" × "+Number(profile.bed?.depth_mm).toFixed(1)+" mm"],
     ["Corner-fit RMS",rms==null?"—":Number(rms).toFixed(3)+" mm"],
-    ["Transform",profile.camera_to_printer?.method||"—"]
+    ["Transform",profile.camera_to_printer?.method||"—"],
+    ["Surface baseline",profile.surface_baseline?"Saved":"Not saved"]
   ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 
   $("calOriginX").value=profile.bed?.origin_x_mm??0;
@@ -682,12 +684,41 @@ function renderSurfaceMetrics(targetId,data){
     el.innerHTML="";
     return;
   }
-  el.innerHTML=[
+  const rows=[
     ["Samples",data.sample_count],
     ["Mean Z",Number(data.mean_z_mm).toFixed(3)+" mm"],
     ["RMS Z",Number(data.rms_z_mm).toFixed(3)+" mm"],
     ["Peak-to-peak",Number(data.peak_to_peak_mm).toFixed(3)+" mm"]
-  ].map(x=>'<div><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join("");
+  ];
+  if(data.deposition){
+    rows.push(
+      ["Mean ΔZ",Number(data.deposition.mean_delta_z_mm).toFixed(3)+" mm"],
+      ["Max ΔZ",Number(data.deposition.max_delta_z_mm).toFixed(3)+" mm"],
+      ["Positive samples",data.deposition.positive_sample_count]
+    );
+  }
+  el.innerHTML=rows.map(x=>'<div><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join("");
+}
+
+async function saveCalibrationSurfaceBaseline(){
+  if(!state.calibrationProfile)return;
+  $("calibrationMessage").textContent="Capturing clean reference surface baseline…";
+  $("saveSurfaceBaseline").disabled=true;
+  try{
+    const d=await api("/api/calibration/baseline",{
+      method:"POST",
+      body:JSON.stringify({columns:12,rows:9})
+    });
+    state.calibrationSurface=d.surface;
+    renderCalibrationProfile(d.profile);
+    renderSurfaceMetrics("surfaceMetrics",d.surface);
+    drawCalibrationOverlay();
+    pill($("surfaceBadge"),true,"BASELINE SAVED");
+    $("calibrationMessage").textContent="Reference surface saved. Future scans can report deposition height relative to this baseline.";
+  }catch(err){
+    $("calibrationMessage").textContent="Unable to save reference surface: "+err.message;
+    $("saveSurfaceBaseline").disabled=false;
+  }
 }
 
 async function analyzeCalibrationSurface(){
@@ -701,7 +732,10 @@ async function analyzeCalibrationSurface(){
     renderSurfaceMetrics("surfaceMetrics",d);
     pill($("surfaceBadge"),true,"SCANNED");
     drawCalibrationOverlay();
-    $("calibrationMessage").textContent="Surface map captured. Green points are near Z=0; yellow/red indicate larger deviation.";
+    $("saveSurfaceBaseline").disabled=false;
+    $("calibrationMessage").textContent=d.deposition
+      ?"Surface map captured and compared with the saved baseline. Overlay color uses deposition ΔZ."
+      :"Surface map captured. Green points are near Z=0; yellow/red indicate larger deviation.";
   }catch(err){
     pill($("surfaceBadge"),false,"ERROR");
     $("calibrationMessage").textContent="Surface analysis failed: "+err.message;
@@ -722,7 +756,8 @@ function renderMonitorCalibration(){
     ["Status","VALID"],
     ["RMS corner error",Number(profile.camera_to_printer?.rms_corner_error_mm||0).toFixed(3)+" mm"],
     ["Bed",Number(profile.bed.width_mm).toFixed(1)+" × "+Number(profile.bed.depth_mm).toFixed(1)+" mm"],
-    ["Nozzle",profile.nozzle_reference?"Referenced":"Not marked"]
+    ["Nozzle",profile.nozzle_reference?"Referenced":"Not marked"],
+    ["Surface baseline",profile.surface_baseline?"Saved":"Not saved"]
   ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
   $("monitorSurfaceScan").disabled=false;
 }
@@ -858,10 +893,17 @@ async function analyzeMonitorSurface(){
       ["RMS Z",Number(d.rms_z_mm).toFixed(3)+" mm"],
       ["Minimum",Number(d.min_z_mm).toFixed(3)+" mm"],
       ["Maximum",Number(d.max_z_mm).toFixed(3)+" mm"],
-      ["Peak-to-peak",Number(d.peak_to_peak_mm).toFixed(3)+" mm"]
+      ["Peak-to-peak",Number(d.peak_to_peak_mm).toFixed(3)+" mm"],
+      ...(d.deposition?[
+        ["Mean deposition ΔZ",Number(d.deposition.mean_delta_z_mm).toFixed(3)+" mm"],
+        ["Max deposition ΔZ",Number(d.deposition.max_delta_z_mm).toFixed(3)+" mm"],
+        ["Positive samples",d.deposition.positive_sample_count]
+      ]:[])
     ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
     drawMonitorOverlay();
-    $("monitorMessage").textContent="Surface scan complete. Overlay points are colored by Z deviation.";
+    $("monitorMessage").textContent=d.deposition
+      ?"Surface scan complete. Overlay points are colored by deposition height relative to the saved baseline."
+      :"Surface scan complete. Overlay points are colored by Z deviation.";
   }catch(err){
     $("monitorMessage").textContent="Surface scan failed: "+err.message;
   }
@@ -1155,6 +1197,7 @@ $("solveCalibration").onclick=()=>solveCalibration();
 $("clearCalibration").onclick=()=>clearCalibration().catch(e=>$("calibrationMessage").textContent=e.message);
 $("markNozzleTip").onclick=()=>beginNozzleMark();
 $("analyzeCalibrationSurface").onclick=()=>analyzeCalibrationSurface();
+$("saveSurfaceBaseline").onclick=()=>saveCalibrationSurfaceBaseline();
 $("calibrationCanvas").onclick=e=>calibrationCanvasClick(e);
 
 $("startMonitor").onclick=()=>startMonitor();

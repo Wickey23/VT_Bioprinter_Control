@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-quality1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-quality2" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -550,8 +550,13 @@
           </article>
 
           <article class="card">
-            <p class="eyebrow">Quality metrics</p>
-            <h3>Latest analysis</h3>
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Quality metrics</p>
+                <h3>Latest analysis</h3>
+              </div>
+              <span id="qualityAdvisoryBadge" class="pill">NO DATA</span>
+            </div>
             <div class="sensor-grid">
               <div><span>Path coverage</span><strong id="qualityCoverage">—</strong></div>
               <div><span>Within tolerance</span><strong id="qualityToleranceRate">—</strong></div>
@@ -560,6 +565,7 @@
               <div><span>Mean |height error|</span><strong id="qualityMeanAbs">—</strong></div>
               <div><span>RMS height error</span><strong id="qualityRms">—</strong></div>
             </div>
+            <p id="qualityAdvisoryReasons" class="muted"></p>
           </article>
         </div>
 
@@ -685,6 +691,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-quality1"></script>
+  <script src="/static/app.js?v=20261020-quality2"></script>
 </body>
 </html>

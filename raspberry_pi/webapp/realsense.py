@@ -70,6 +70,7 @@ class RealSenseLiveManager:
         self._latest_depth_raw = None
         self._depth_intrinsics = None
         self._depth_scale: float | None = None
+        self._intrinsics_info: dict[str, Any] | None = None
         self._frame_width: int = 0
         self._frame_height: int = 0
 
@@ -88,6 +89,7 @@ class RealSenseLiveManager:
                 "depth_resolution": self._depth_resolution,
                 "frame_width": self._frame_width,
                 "frame_height": self._frame_height,
+                "intrinsics": self._intrinsics_info,
                 "target_fps": self._target_fps,
             }
 
@@ -103,6 +105,7 @@ class RealSenseLiveManager:
             self._latest_depth_raw = None
             self._depth_intrinsics = None
             self._depth_scale = None
+            self._intrinsics_info = None
             self._frame_width = 0
             self._frame_height = 0
             self._last_frame_at = None
@@ -135,6 +138,7 @@ class RealSenseLiveManager:
             "depth_resolution": self._depth_resolution,
             "frame_width": self._frame_width,
             "frame_height": self._frame_height,
+            "intrinsics": self._intrinsics_info,
             "target_fps": self._target_fps,
         }
 
@@ -196,6 +200,50 @@ class RealSenseLiveManager:
             "frame_width": width,
             "frame_height": height,
         }
+
+    def sample_pixels(self, pixels: list[tuple[float, float]], radius: int = 2) -> list[dict[str, Any]]:
+        try:
+            import numpy as np
+            import pyrealsense2 as rs  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("RealSense Python bindings are unavailable.") from exc
+
+        with self._lock:
+            if self._latest_depth_raw is None or self._depth_intrinsics is None or self._depth_scale is None:
+                raise RuntimeError("No aligned live depth frame is available. Start the live camera first.")
+            depth_raw = self._latest_depth_raw.copy()
+            intrinsics = self._depth_intrinsics
+            scale = float(self._depth_scale)
+            width = int(self._frame_width)
+            height = int(self._frame_height)
+
+        results: list[dict[str, Any]] = []
+        for u, v in pixels:
+            x = int(round(max(0, min(width - 1, float(u)))))
+            y = int(round(max(0, min(height - 1, float(v)))))
+            x0, x1 = max(0, x - radius), min(width, x + radius + 1)
+            y0, y1 = max(0, y - radius), min(height, y + radius + 1)
+            roi = depth_raw[y0:y1, x0:x1]
+            valid = roi[roi > 0]
+
+            if valid.size == 0:
+                results.append({"u": float(x), "v": float(y), "valid": False})
+                continue
+
+            depth_m = float(np.median(valid) * scale)
+            point = rs.rs2_deproject_pixel_to_point(intrinsics, [float(x), float(y)], depth_m)
+            results.append(
+                {
+                    "u": float(x),
+                    "v": float(y),
+                    "valid": True,
+                    "depth_m": round(depth_m, 6),
+                    "camera_xyz_m": [round(float(value), 6) for value in point],
+                    "frame_width": width,
+                    "frame_height": height,
+                }
+            )
+        return results
 
     def _run(self) -> None:
         pipeline = None
@@ -349,6 +397,16 @@ class RealSenseLiveManager:
                     self._latest_depth_raw = depth_raw
                     self._depth_intrinsics = depth_intrinsics
                     self._depth_scale = float(depth_scale)
+                    self._intrinsics_info = {
+                        "width": int(depth_intrinsics.width),
+                        "height": int(depth_intrinsics.height),
+                        "fx": float(depth_intrinsics.fx),
+                        "fy": float(depth_intrinsics.fy),
+                        "ppx": float(depth_intrinsics.ppx),
+                        "ppy": float(depth_intrinsics.ppy),
+                        "model": str(depth_intrinsics.model),
+                        "coeffs": [float(value) for value in depth_intrinsics.coeffs],
+                    }
                     self._frame_width = int(depth.get_width())
                     self._frame_height = int(depth.get_height())
                     self._last_frame_at = now
@@ -441,6 +499,19 @@ def sample_live_pixel(u: float, v: float, radius: int = 2) -> dict[str, Any]:
     while time.monotonic() < deadline:
         if LIVE_CAMERA.status().get("sample_ready"):
             return LIVE_CAMERA.sample_pixel(u, v, radius=radius)
+        time.sleep(0.05)
+    raise RuntimeError("Timed out waiting for an aligned D405 depth frame.")
+
+
+def sample_live_pixels(pixels: list[tuple[float, float]], radius: int = 2) -> list[dict[str, Any]]:
+    if not LIVE_CAMERA.status()["running"]:
+        status = LIVE_CAMERA.start()
+        if status.get("error"):
+            raise RuntimeError(status["error"])
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if LIVE_CAMERA.status().get("sample_ready"):
+            return LIVE_CAMERA.sample_pixels(pixels, radius=radius)
         time.sleep(0.05)
     raise RuntimeError("Timed out waiting for an aligned D405 depth frame.")
 

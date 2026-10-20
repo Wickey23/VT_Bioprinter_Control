@@ -20,7 +20,9 @@ const state={
   projectedPlan:null,
   activeExperiment:null,
   printerPosition:null,
-  printerProjectedPixel:null
+  printerProjectedPixel:null,
+  qualityResult:null,
+  qualityObjectUrl:null
 };
 
 async function api(path,opts={}){
@@ -486,6 +488,7 @@ function renderCalibrationProfile(profile){
     $("nozzleDetails").innerHTML="";
     $("calibrationMessage").textContent="Capture a camera frame, then click the four bed corners in printer-coordinate order.";
     renderMonitorCalibration();
+    updateAnalyticsReadiness();
     return;
   }
 
@@ -519,6 +522,7 @@ function renderCalibrationProfile(profile){
 
   $("calibrationMessage").textContent="Calibration is saved. Keep the D405 rigidly mounted; moving the camera invalidates this transform.";
   renderMonitorCalibration();
+  updateAnalyticsReadiness();
 }
 
 async function loadCalibration(){
@@ -956,6 +960,7 @@ function renderPlan(plan){
     $("planMessage").textContent="No print plan loaded.";
     state.projectedPlan=null;
     drawMonitorOverlay();
+    updateAnalyticsReadiness();
     return;
   }
 
@@ -974,6 +979,7 @@ function renderPlan(plan){
   ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 
   $("planMessage").textContent="Plan parsed. It will appear as the expected extrusion path in Monitor after camera calibration.";
+  updateAnalyticsReadiness();
 }
 
 async function loadPlan(){
@@ -1123,6 +1129,123 @@ async function stopExperimentSession(){
   }
 }
 
+
+function updateAnalyticsReadiness(){
+  const calibrated=!!state.calibrationProfile;
+  const baseline=!!state.calibrationProfile?.surface_baseline;
+  const plan=!!state.planSummary;
+  const ready=calibrated&&baseline&&plan;
+  pill($("qualityReadinessBadge"),ready,ready?"READY":"SETUP REQUIRED");
+  $("runQualityAnalysis").disabled=!ready;
+
+  if(!calibrated){
+    $("qualityMessage").textContent="Camera-to-printer calibration is required.";
+  }else if(!baseline){
+    $("qualityMessage").textContent="Save a clean reference surface in Calibration.";
+  }else if(!plan){
+    $("qualityMessage").textContent="Load the experiment G-code on the Print page.";
+  }else if(!state.qualityResult){
+    $("qualityMessage").textContent="Ready for observe-only expected-vs-observed surface analysis.";
+  }
+}
+
+function qualityColor(classification){
+  return {
+    within_tolerance:"#22c55e",
+    too_low:"#eab308",
+    too_high:"#f97316",
+    missing:"#ef4444",
+    excess:"#d946ef",
+    background:"#64748b"
+  }[classification]||"#64748b";
+}
+
+function drawQualityOverlay(){
+  const canvas=$("qualityCanvas");
+  const img=$("qualityImage");
+  setupCanvasForImage(img,canvas);
+  if(!canvas.width||!canvas.height)return;
+  const ctx=canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const points=state.qualityResult?.points||[];
+  for(const point of points){
+    ctx.beginPath();
+    ctx.arc(point.u,point.v,5,0,Math.PI*2);
+    ctx.fillStyle=qualityColor(point.classification);
+    ctx.globalAlpha=point.classification==="background"?.25:.9;
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  if(state.projectedPlan?.segments?.length){
+    ctx.save();
+    ctx.strokeStyle="#38bdf8";
+    ctx.lineWidth=1.5;
+    ctx.globalAlpha=.4;
+    ctx.beginPath();
+    for(const segment of state.projectedPlan.segments){
+      ctx.moveTo(segment.start[0],segment.start[1]);
+      ctx.lineTo(segment.end[0],segment.end[1]);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function renderQualityResult(result){
+  state.qualityResult=result;
+  $("qualityCoverage").textContent=result.coverage_percent==null?"—":Number(result.coverage_percent).toFixed(1)+"%";
+  $("qualityToleranceRate").textContent=result.within_tolerance_percent==null?"—":Number(result.within_tolerance_percent).toFixed(1)+"%";
+  $("qualityMissing").textContent=result.missing_path_samples??"—";
+  $("qualityExcess").textContent=result.excess_off_path_samples??"—";
+  $("qualityMeanAbs").textContent=result.mean_abs_height_error_mm==null?"—":Number(result.mean_abs_height_error_mm).toFixed(3)+" mm";
+  $("qualityRms").textContent=result.rms_height_error_mm==null?"—":Number(result.rms_height_error_mm).toFixed(3)+" mm";
+  drawQualityOverlay();
+}
+
+async function runQualityAnalysis(){
+  updateAnalyticsReadiness();
+  if($("runQualityAnalysis").disabled)return;
+
+  $("qualityMessage").textContent="Capturing D405 surface and comparing it with expected G-code geometry…";
+  $("runQualityAnalysis").disabled=true;
+  try{
+    await ensureCalibrationCamera();
+
+    const imageBlob=await fetchCameraBlob("/api/camera/color.jpg");
+    if(state.qualityObjectUrl)URL.revokeObjectURL(state.qualityObjectUrl);
+    state.qualityObjectUrl=URL.createObjectURL(imageBlob);
+    const img=$("qualityImage");
+    img.onload=()=>{
+      setupCanvasForImage(img,$("qualityCanvas"));
+      $("qualityStage").classList.add("has-image");
+      drawQualityOverlay();
+    };
+    img.src=state.qualityObjectUrl;
+
+    if(!state.projectedPlan)await loadProjectedPlan();
+
+    const payload={
+      columns:14,
+      rows:10,
+      path_radius_mm:Number($("qualityPathRadius").value),
+      min_deposition_height_mm:Number($("qualityMinHeight").value),
+      height_tolerance_mm:Number($("qualityHeightTolerance").value)
+    };
+    const result=await api("/api/quality/final-surface",{
+      method:"POST",
+      body:JSON.stringify(payload)
+    });
+    renderQualityResult(result);
+    $("qualityMessage").textContent="Quality scan complete. Results are observe-only research measurements.";
+  }catch(err){
+    $("qualityMessage").textContent="Quality analysis failed: "+err.message;
+  }finally{
+    updateAnalyticsReadiness();
+  }
+}
+
 async function hotspot(){
   const h=await api("/api/network/hotspot");
   $("hotspotSsid").textContent=h.ssid;
@@ -1192,6 +1315,12 @@ function activatePage(page){
   }
   if(page==="print"){loadPlan().catch(()=>{})}
   if(page==="experiments"){loadExperiments().catch(()=>{})}
+  if(page==="analytics"){
+    Promise.allSettled([loadCalibration(),loadPlan()]).then(()=>{
+      loadProjectedPlan().catch(()=>{});
+      updateAnalyticsReadiness();
+    });
+  }
 }
 
 document.querySelectorAll(".nav-btn").forEach(b=>b.onclick=()=>activatePage(b.dataset.page));
@@ -1248,6 +1377,8 @@ $("startExperiment").onclick=()=>startExperimentSession();
 $("captureExperimentSnapshot").onclick=()=>captureExperimentSnapshot();
 $("stopExperiment").onclick=()=>stopExperimentSession();
 $("refreshExperiments").onclick=()=>loadExperiments().catch(e=>$("experimentMessage").textContent=e.message);
+
+$("runQualityAnalysis").onclick=()=>runQualityAnalysis();
 
 $("scanWifi").onclick=()=>scan().catch(e=>$("wifiList").innerHTML='<p class="error">'+esc(e.message)+'</p>');
 $("manualConnect").onclick=()=>{

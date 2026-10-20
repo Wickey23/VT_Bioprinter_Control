@@ -722,7 +722,7 @@ async function saveCalibrationSurfaceBaseline(){
   try{
     const d=await api("/api/calibration/baseline",{
       method:"POST",
-      body:JSON.stringify({columns:12,rows:9})
+      body:JSON.stringify({columns:14,rows:10})
     });
     state.calibrationSurface=d.surface;
     renderCalibrationProfile(d.profile);
@@ -741,7 +741,7 @@ async function analyzeCalibrationSurface(){
   try{
     const d=await api("/api/calibration/surface",{
       method:"POST",
-      body:JSON.stringify({columns:12,rows:9})
+      body:JSON.stringify({columns:14,rows:10})
     });
     state.calibrationSurface=d;
     renderSurfaceMetrics("surfaceMetrics",d);

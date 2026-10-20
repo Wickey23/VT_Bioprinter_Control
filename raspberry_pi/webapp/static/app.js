@@ -17,7 +17,8 @@ const state={
   monitorObjectUrl:null,
   monitorSurface:null,
   planSummary:null,
-  projectedPlan:null
+  projectedPlan:null,
+  activeExperiment:null
 };
 
 async function api(path,opts={}){
@@ -953,6 +954,97 @@ async function clearGcode(){
   renderPlan(null);
 }
 
+
+function formatDuration(seconds){
+  if(seconds==null)return "—";
+  const s=Math.max(0,Math.round(Number(seconds)||0));
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  return [h?h+"h":"",m?m+"m":"",sec+"s"].filter(Boolean).join(" ");
+}
+
+function renderExperimentState(active,recent=[]){
+  state.activeExperiment=active||null;
+  const running=!!active;
+  pill($("experimentBadge"),running,running?"RECORDING":"IDLE");
+  $("startExperiment").disabled=running;
+  $("captureExperimentSnapshot").disabled=!running;
+  $("stopExperiment").disabled=!running;
+  $("experimentName").disabled=running;
+
+  if(running){
+    const planName=active.plan?.filename||"No G-code plan";
+    const calibrated=active.calibration?.camera_to_printer?"Yes":"No";
+    $("experimentDetails").innerHTML=[
+      ["Name",active.name],
+      ["Mode",active.mode||"OBSERVE"],
+      ["Calibration",calibrated],
+      ["G-code",planName],
+      ["Events",active.event_count||0],
+      ["Snapshots",active.snapshot_count||0]
+    ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+    $("experimentMessage").textContent="Recording research events in OBSERVE mode. Monitor probes and surface scans are logged automatically.";
+  }else{
+    $("experimentDetails").innerHTML='<div><span>Status</span><strong>No active session</strong></div>';
+    $("experimentMessage").textContent="Experiments run in OBSERVE mode and do not command the printer.";
+  }
+
+  $("recentExperiments").innerHTML=recent.length?recent.map(item=>{
+    const complete=!!item.ended_at_unix;
+    const started=item.started_at_unix?new Date(item.started_at_unix*1000).toLocaleString():"—";
+    const duration=complete?formatDuration(item.duration_seconds):"Running";
+    return '<div class="experiment-item">'+
+      '<div><strong>'+esc(item.name||"Experiment")+'</strong><small>'+esc(started)+'</small></div>'+
+      '<div><small>Mode</small><strong>'+esc(item.mode||"OBSERVE")+'</strong></div>'+
+      '<div><small>Snapshots</small><strong>'+esc(item.snapshot_count||0)+'</strong></div>'+
+      '<div><span class="experiment-state '+(complete?"complete":"active")+'">'+(complete?"COMPLETE":"ACTIVE")+'</span><small>'+esc(duration)+'</small></div>'+
+      '</div>';
+  }).join(""):'<p class="muted">No saved experiments yet.</p>';
+}
+
+async function loadExperiments(){
+  const d=await api("/api/experiment");
+  renderExperimentState(d.active,d.recent||[]);
+  return d;
+}
+
+async function startExperimentSession(){
+  const name=$("experimentName").value.trim()||"Bioprinter experiment";
+  $("experimentMessage").textContent="Starting experiment…";
+  try{
+    const d=await api("/api/experiment/start",{
+      method:"POST",
+      body:JSON.stringify({name})
+    });
+    await loadExperiments();
+    $("experimentMessage").textContent="Experiment started. Calibration and active G-code metadata were captured.";
+  }catch(err){
+    $("experimentMessage").textContent="Unable to start experiment: "+err.message;
+  }
+}
+
+async function captureExperimentSnapshot(){
+  $("experimentMessage").textContent="Capturing synchronized RGB + depth snapshot…";
+  try{
+    const d=await api("/api/experiment/snapshot",{method:"POST"});
+    await loadExperiments();
+    $("experimentMessage").textContent="Snapshot "+d.snapshot.index+" recorded with RGB, depth, and center depth measurement.";
+  }catch(err){
+    $("experimentMessage").textContent="Snapshot failed: "+err.message;
+  }
+}
+
+async function stopExperimentSession(){
+  if(!confirm("Stop the active experiment and finalize its metadata?"))return;
+  $("experimentMessage").textContent="Finalizing experiment…";
+  try{
+    const d=await api("/api/experiment/stop",{method:"POST"});
+    await loadExperiments();
+    $("experimentMessage").textContent="Experiment complete. Duration: "+formatDuration(d.experiment.duration_seconds)+".";
+  }catch(err){
+    $("experimentMessage").textContent="Unable to stop experiment: "+err.message;
+  }
+}
+
 async function hotspot(){
   const h=await api("/api/network/hotspot");
   $("hotspotSsid").textContent=h.ssid;
@@ -1021,6 +1113,7 @@ function activatePage(page){
     Promise.allSettled([loadCalibration(),loadPlan()]).then(()=>loadProjectedPlan().catch(()=>{}));
   }
   if(page==="print"){loadPlan().catch(()=>{})}
+  if(page==="experiments"){loadExperiments().catch(()=>{})}
 }
 
 document.querySelectorAll(".nav-btn").forEach(b=>b.onclick=()=>activatePage(b.dataset.page));
@@ -1071,6 +1164,11 @@ $("monitorCanvas").onclick=e=>monitorCanvasClick(e);
 
 $("loadGcode").onclick=()=>loadGcodeFile();
 $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
+
+$("startExperiment").onclick=()=>startExperimentSession();
+$("captureExperimentSnapshot").onclick=()=>captureExperimentSnapshot();
+$("stopExperiment").onclick=()=>stopExperimentSession();
+$("refreshExperiments").onclick=()=>loadExperiments().catch(e=>$("experimentMessage").textContent=e.message);
 
 $("scanWifi").onclick=()=>scan().catch(e=>$("wifiList").innerHTML='<p class="error">'+esc(e.message)+'</p>');
 $("manualConnect").onclick=()=>{
@@ -1134,7 +1232,7 @@ $("loginForm").onsubmit=async e=>{
     try{
       await api("/api/status");
       $("loginOverlay").classList.add("hidden");
-      await Promise.allSettled([status(),printer(),camera(),loadCommissioning(),loadCalibration(),loadPlan()]);
+      await Promise.allSettled([status(),printer(),camera(),loadCommissioning(),loadCalibration(),loadPlan(),loadExperiments()]);
     }catch{}
   }
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);

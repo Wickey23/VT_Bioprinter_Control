@@ -27,6 +27,7 @@ from webapp.calibration import (
     solve_bed_calibration,
     transform_camera_point,
 )
+from webapp.print_plan import clear_plan, load_plan, parse_gcode, project_plan
 from webapp.realsense import (
     capture_color_jpeg,
     capture_depth_jpeg,
@@ -111,6 +112,11 @@ class PixelPointRequest(BaseModel):
 class SurfaceAnalysisRequest(BaseModel):
     columns: int = Field(default=12, ge=4, le=30)
     rows: int = Field(default=9, ge=4, le=30)
+
+
+class PlanLoadRequest(BaseModel):
+    filename: str = Field(default="print.gcode", min_length=1, max_length=256)
+    text: str = Field(min_length=1)
 
 
 def load_token() -> str:
@@ -752,6 +758,46 @@ def api_calibration_surface(payload: SurfaceAnalysisRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc))
 
     return result
+
+
+@app.get("/api/plan", dependencies=[Depends(require_token)])
+def api_plan_status() -> dict[str, Any]:
+    plan = load_plan()
+    if not plan:
+        return {"loaded": False, "plan": None}
+    summary = {key: value for key, value in plan.items() if key != "segments"}
+    return {"loaded": True, "plan": summary}
+
+
+@app.post("/api/plan", dependencies=[Depends(require_token)])
+def api_plan_load(payload: PlanLoadRequest) -> dict[str, Any]:
+    try:
+        plan = parse_gcode(payload.text, payload.filename)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    summary = {key: value for key, value in plan.items() if key != "segments"}
+    return {"ok": True, "plan": summary}
+
+
+@app.delete("/api/plan", dependencies=[Depends(require_token)])
+def api_plan_clear() -> dict[str, Any]:
+    clear_plan()
+    return {"ok": True}
+
+
+@app.get("/api/plan/projected", dependencies=[Depends(require_token)])
+def api_plan_projected() -> dict[str, Any]:
+    profile = load_profile()
+    plan = load_plan()
+    if not profile:
+        raise HTTPException(status_code=409, detail="Camera-to-printer calibration is required before projecting G-code.")
+    if not plan:
+        raise HTTPException(status_code=409, detail="No G-code print plan is loaded.")
+
+    try:
+        return project_plan(profile, plan)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/camera/depth.jpg", dependencies=[Depends(require_token)])

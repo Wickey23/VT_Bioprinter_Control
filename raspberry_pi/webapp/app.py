@@ -7,6 +7,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ NETWORK_HELPER = Path(os.environ.get("VT_BIOPRINTER_NETWORK_HELPER", "/usr/local
 
 BAUD = 115200
 SAFE_COMMANDS = {"M105", "M114", "M115", "M119", "M503"}
+SERIAL_LOCK = threading.Lock()
 
 HOTSPOT_NAME = "VT-Bioprinter-Setup"
 HOTSPOT_PASSWORD = "bioprinter"
@@ -261,29 +263,30 @@ def send_safe_command(command: str) -> dict[str, Any]:
 
     lines: list[str] = []
     try:
-        with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
-            # Synchronize to a clean Marlin command boundary. CH340-connected
-            # Creality boards can occasionally have a partial garbage line in
-            # the firmware RX buffer immediately after the port is opened.
-            time.sleep(1.0)
-            port.reset_input_buffer()
-            port.write(b"\n")
-            port.flush()
-            time.sleep(0.35)
-            port.reset_input_buffer()
-            port.write((normalized + "\n").encode("ascii"))
-            port.flush()
-            deadline = time.monotonic() + 4.0
-            while time.monotonic() < deadline:
-                raw = port.readline()
-                if not raw:
-                    continue
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                lines.append(line)
-                if line == "ok" or line.startswith("Error:"):
-                    break
+        with SERIAL_LOCK:
+            with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+                # Synchronize to a clean Marlin command boundary. CH340-connected
+                # Creality boards can occasionally have a partial garbage line in
+                # the firmware RX buffer immediately after the port is opened.
+                time.sleep(1.0)
+                port.reset_input_buffer()
+                port.write(b"\n")
+                port.flush()
+                time.sleep(0.35)
+                port.reset_input_buffer()
+                port.write((normalized + "\n").encode("ascii"))
+                port.flush()
+                deadline = time.monotonic() + 4.0
+                while time.monotonic() < deadline:
+                    raw = port.readline()
+                    if not raw:
+                        continue
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    lines.append(line)
+                    if line == "ok" or line.startswith("Error:"):
+                        break
     except (serial.SerialException, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
 
@@ -341,28 +344,29 @@ def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, 
     commands = ["G91", f"G0 {axis}{distance_mm:g} F{feed_mm_min}", "G90"]
     responses: list[str] = []
     try:
-        with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
-            time.sleep(1.0)
-            port.reset_input_buffer()
-            port.write(b"\n")
-            port.flush()
-            time.sleep(0.35)
-            port.reset_input_buffer()
-
-            for command in commands:
-                port.write((command + "\n").encode("ascii"))
+        with SERIAL_LOCK:
+            with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+                time.sleep(1.0)
+                port.reset_input_buffer()
+                port.write(b"\n")
                 port.flush()
-                deadline = time.monotonic() + 4.0
-                while time.monotonic() < deadline:
-                    raw = port.readline()
-                    if not raw:
-                        continue
-                    line = raw.decode("utf-8", errors="replace").strip()
-                    if not line:
-                        continue
-                    responses.append(f"{command}: {line}")
-                    if line == "ok" or line.startswith("Error:"):
-                        break
+                time.sleep(0.35)
+                port.reset_input_buffer()
+
+                for command in commands:
+                    port.write((command + "\n").encode("ascii"))
+                    port.flush()
+                    deadline = time.monotonic() + 4.0
+                    while time.monotonic() < deadline:
+                        raw = port.readline()
+                        if not raw:
+                            continue
+                        line = raw.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        responses.append(f"{command}: {line}")
+                        if line == "ok" or line.startswith("Error:"):
+                            break
     except (serial.SerialException, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
 
@@ -380,10 +384,11 @@ def emergency_stop() -> dict[str, Any]:
     if not target:
         raise HTTPException(status_code=409, detail="Printer serial interface is not connected.")
     try:
-        with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
-            time.sleep(0.2)
-            port.write(b"M112\n")
-            port.flush()
+        with SERIAL_LOCK:
+            with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+                time.sleep(0.2)
+                port.write(b"M112\n")
+                port.flush()
     except (serial.SerialException, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
     return {"ok": True, "message": "Marlin emergency-stop command sent. Use the physical power stop for a hardware emergency."}
@@ -549,6 +554,20 @@ def api_printer_jog(payload: JogRequest) -> dict[str, Any]:
 @app.post("/api/printer/emergency-stop", dependencies=[Depends(require_token)])
 def api_printer_emergency_stop() -> dict[str, Any]:
     return emergency_stop()
+
+
+@app.get("/api/printer/port-owner", dependencies=[Depends(require_token)])
+def api_printer_port_owner() -> dict[str, Any]:
+    target = chosen_printer()
+    if not target:
+        return {"connected": False, "device": None, "owners": ""}
+    proc = run_command(["fuser", "-v", target["device"]], timeout=5)
+    return {
+        "connected": True,
+        "device": target["device"],
+        "owners": (proc.stdout + proc.stderr).strip(),
+        "returncode": proc.returncode,
+    }
 
 
 @app.get("/api/camera/status", dependencies=[Depends(require_token)])

@@ -215,17 +215,33 @@ async function syncLiveCameraStatus(){
 }
 
 async function startLiveCamera(){
-  $("cameraMessage").textContent="Starting D405 RGB + depth stream…";
+  $("cameraMessage").textContent="Starting D405 live view…";
+  $("liveCameraBadge").textContent="STARTING";
+  $("liveCameraBadge").className="pill";
+  $("startLiveCamera").disabled=true;
   try{
-    const s=await api("/api/camera/live/start",{method:"POST"});
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),12000);
+    const headers={"X-Bioprinter-Token":state.token};
+    const r=await fetch("/api/camera/live/start",{
+      method:"POST",
+      headers,
+      signal:controller.signal
+    });
+    clearTimeout(timer);
+    const s=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(s.detail||("HTTP "+r.status));
     state.liveCamera=true;
     updateLiveControls(s);
-    $("cameraMessage").textContent="Live D405 feed is running. Depth measurements now use the same live pipeline.";
+    $("cameraMessage").textContent=(s.stream||"D405 live")+" feed is running. Depth measurements now use the same camera pipeline.";
     runLiveCameraLoop();
   }catch(err){
     state.liveCamera=false;
-    $("cameraMessage").textContent=err.message;
-    updateLiveControls({running:false,error:err.message});
+    const msg=err.name==="AbortError"
+      ?"Camera start timed out. Refresh Camera and try once more."
+      :err.message;
+    $("cameraMessage").textContent=msg;
+    updateLiveControls({running:false,error:msg});
   }
 }
 

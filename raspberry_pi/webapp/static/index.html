@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-intel2" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-pos1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -421,6 +421,14 @@
             <p class="muted">Click anywhere in the live image to measure the corresponding 3D point in printer coordinates.</p>
 
             <div class="monitor-section">
+              <p class="eyebrow">Printer-reported position</p>
+              <div id="monitorPrinterDetails" class="detail-list">
+                <div><span>Status</span><strong>Waiting</strong></div>
+              </div>
+              <p class="muted">M114 is read-only. Coordinates are meaningful only after the printer has a known coordinate reference.</p>
+            </div>
+
+            <div class="monitor-section">
               <p class="eyebrow">Calibration</p>
               <div id="monitorCalibrationDetails" class="detail-list"></div>
             </div>
@@ -612,6 +620,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-intel2"></script>
+  <script src="/static/app.js?v=20261020-pos1"></script>
 </body>
 </html>

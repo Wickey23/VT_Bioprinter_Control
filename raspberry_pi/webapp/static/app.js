@@ -21,6 +21,7 @@ const state={
   activeExperiment:null,
   printerPosition:null,
   printerProjectedPixel:null,
+  trackedNozzle:null,
   qualityResult:null,
   qualityObjectUrl:null
 };
@@ -808,6 +809,12 @@ function drawMonitorOverlay(){
     const ctx=canvas.getContext("2d");
     drawMarker(ctx,state.printerProjectedPixel[0],state.printerProjectedPixel[1],"M114","#a78bfa");
   }
+
+  if(state.trackedNozzle){
+    const ctx=canvas.getContext("2d");
+    const pct=Math.round(Number(state.trackedNozzle.confidence||0)*100);
+    drawMarker(ctx,state.trackedNozzle.u,state.trackedNozzle.v,"VISION "+pct+"%","#f59e0b");
+  }
 }
 
 async function refreshPrinterPosition(){
@@ -831,6 +838,35 @@ async function refreshPrinterPosition(){
   }
 }
 
+async function refreshNozzleTracking(){
+  if(!state.calibrationProfile?.nozzle_reference?.vision_template){
+    state.trackedNozzle=null;
+    $("monitorNozzleTrackDetails").innerHTML='<div><span>Status</span><strong>Re-mark nozzle in Calibration</strong></div>';
+    return null;
+  }
+
+  try{
+    const d=await api("/api/monitor/nozzle-track");
+    const t=d.tracked;
+    state.trackedNozzle=t;
+    const xyz=t.printer_xyz_mm||[];
+    $("monitorNozzleTrackDetails").innerHTML=[
+      ["Confidence",Math.round(Number(t.confidence||0)*100)+"%"],
+      ["Correlation",Number(t.correlation||0).toFixed(3)],
+      ["X",xyz.length?Number(xyz[0]).toFixed(2)+" mm":"—"],
+      ["Y",xyz.length?Number(xyz[1]).toFixed(2)+" mm":"—"],
+      ["Z",xyz.length?Number(xyz[2]).toFixed(2)+" mm":"—"],
+      ["Recovery",t.recovered_full_frame?"Full-frame search":"Local search"]
+    ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+    drawMonitorOverlay();
+    return d;
+  }catch(err){
+    state.trackedNozzle=null;
+    $("monitorNozzleTrackDetails").innerHTML='<div><span>Status</span><strong>'+esc(err.message)+'</strong></div>';
+    return null;
+  }
+}
+
 async function startMonitor(){
   $("monitorMessage").textContent="Starting calibrated camera monitor…";
   try{
@@ -843,6 +879,7 @@ async function startMonitor(){
     $("monitorPlaceholder").style.display="none";
     monitorLoop(state.monitorGeneration);
     refreshPrinterPosition().catch(()=>{});
+    refreshNozzleTracking().catch(()=>{});
     $("monitorMessage").textContent=state.calibrationProfile
       ?"Observe mode active. Click the image to query printer X/Y/Z."
       :"Camera is live, but calibration is required for printer coordinates.";
@@ -868,6 +905,7 @@ async function stopMonitor(){
   $("monitorPlaceholder").style.display="";
   $("monitorPlaceholder").textContent="Start the monitor to view calibrated printer coordinates.";
   state.printerProjectedPixel=null;
+  state.trackedNozzle=null;
 }
 
 async function monitorLoop(generation){
@@ -890,6 +928,9 @@ async function monitorLoop(generation){
       frameCounter++;
       if(frameCounter%10===0){
         refreshPrinterPosition().catch(()=>{});
+      }
+      if(frameCounter%15===0){
+        refreshNozzleTracking().catch(()=>{});
       }
     }catch(err){
       $("monitorMessage").textContent="Monitor frame error: "+err.message;

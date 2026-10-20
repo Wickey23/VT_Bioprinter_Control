@@ -24,6 +24,7 @@ from webapp.calibration import (
     clear_profile,
     load_profile,
     save_nozzle_reference,
+    save_surface_baseline,
     solve_bed_calibration,
     transform_camera_point,
 )
@@ -772,6 +773,35 @@ def api_calibration_surface(payload: SurfaceAnalysisRequest) -> dict[str, Any]:
 
     log_event("surface_scan", {key: value for key, value in result.items() if key != "samples"})
     return result
+
+
+@app.post("/api/calibration/baseline", dependencies=[Depends(require_token)])
+def api_calibration_baseline(payload: SurfaceAnalysisRequest) -> dict[str, Any]:
+    profile = load_profile()
+    if not profile:
+        raise HTTPException(status_code=409, detail="Complete bed calibration before saving a reference surface.")
+
+    try:
+        result = analyze_surface(
+            profile,
+            sample_live_pixels,
+            columns=payload.columns,
+            rows=payload.rows,
+        )
+        profile = save_surface_baseline(profile, result)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    log_event(
+        "surface_baseline_saved",
+        {
+            "sample_count": result.get("sample_count"),
+            "grid": result.get("grid"),
+            "rms_z_mm": result.get("rms_z_mm"),
+            "peak_to_peak_mm": result.get("peak_to_peak_mm"),
+        },
+    )
+    return {"ok": True, "profile": profile, "surface": result}
 
 
 @app.get("/api/experiment", dependencies=[Depends(require_token)])

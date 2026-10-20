@@ -27,6 +27,7 @@ Filled from the physical machine inspection on 2026-10-02.
 - Number of independently driven syringe heads: Not yet verified
 - Power supply voltage: Not yet verified from PSU output label
 - AC input / rated power from printer label: 100–120 V / 200–240 V AC, 50/60 Hz, **350 W**
+- Vision/depth sensor: **Intel RealSense Depth Camera D405**, USB-connected; planned connection to a Raspberry Pi 4 USB 3 port for close-range depth sensing and print-area monitoring.
 - Notes/photos: Physical inspection confirms Creality V4.2.2 controller. Windows direct communication to the printer controller over CH340 USB serial has been verified previously. The Raspberry Pi host is now fully staged; printer-side serial detection on the Pi is pending the next lab connection. Do not flash firmware until the remaining electrical and motion fields are verified.
 
 ## Gate

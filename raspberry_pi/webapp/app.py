@@ -49,7 +49,9 @@ from webapp.quality import analyze_final_surface_quality
 from webapp.realsense import (
     capture_color_jpeg,
     capture_depth_jpeg,
+    capture_live_template,
     capture_depth_sample,
+    latest_live_rgb,
     live_camera_status,
     sample_live_pixel,
     sample_live_pixels,
@@ -57,6 +59,7 @@ from webapp.realsense import (
     stop_live_camera,
     usb_camera_status,
 )
+from webapp.vision import track_template
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -670,6 +673,77 @@ def api_monitor_printer_position() -> dict[str, Any]:
     }
 
 
+@app.get("/api/monitor/nozzle-track", dependencies=[Depends(require_token)])
+def api_monitor_nozzle_track() -> dict[str, Any]:
+    profile = load_profile()
+    if not profile or not profile.get("nozzle_reference"):
+        raise HTTPException(status_code=409, detail="Mark a nozzle/syringe-tip reference in Calibration first.")
+
+    reference = profile["nozzle_reference"]
+    template = reference.get("vision_template")
+    if not template:
+        raise HTTPException(
+            status_code=409,
+            detail="The saved nozzle reference predates vision tracking. Re-mark the nozzle tip once.",
+        )
+
+    predicted = None
+    reported_position = None
+    if chosen_printer():
+        try:
+            marlin = send_safe_command("M114")
+            reported_position = parse_m114_response(marlin["response"])
+            camera_xyz = printer_to_camera(
+                profile,
+                [
+                    reported_position["x"],
+                    reported_position["y"],
+                    reported_position["z"],
+                ],
+            )
+            predicted = project_camera_point(profile, camera_xyz)
+        except Exception:
+            predicted = None
+
+    if predicted is None:
+        predicted = reference.get("pixel")
+
+    try:
+        frame = latest_live_rgb()
+        tracked = track_template(
+            frame,
+            template,
+            predicted_pixel=predicted,
+        )
+        depth_sample = sample_live_pixel(tracked["u"], tracked["v"])
+        tracked["depth_m"] = depth_sample.get("depth_m")
+        tracked["camera_xyz_m"] = depth_sample.get("camera_xyz_m")
+        tracked["printer_xyz_mm"] = transform_camera_point(
+            profile,
+            depth_sample["camera_xyz_m"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    result = {
+        "tracked": tracked,
+        "predicted_pixel": predicted,
+        "marlin_position_mm": reported_position,
+        "reference_pixel": reference.get("pixel"),
+        "mode": "OBSERVE",
+    }
+    log_event(
+        "nozzle_track",
+        {
+            "u": tracked.get("u"),
+            "v": tracked.get("v"),
+            "confidence": tracked.get("confidence"),
+            "printer_xyz_mm": tracked.get("printer_xyz_mm"),
+        },
+    )
+    return result
+
+
 @app.get("/api/commissioning", dependencies=[Depends(require_token)])
 def api_commissioning_status() -> dict[str, Any]:
     return read_commissioning()
@@ -809,11 +883,13 @@ def api_calibration_nozzle(payload: PixelPointRequest) -> dict[str, Any]:
 
     try:
         sample = sample_live_pixel(payload.u, payload.v)
+        template = capture_live_template(sample["u"], sample["v"], size=31)
         profile = save_nozzle_reference(
             profile,
             pixel_u=sample["u"],
             pixel_v=sample["v"],
             camera_xyz_m=sample["camera_xyz_m"],
+            template=template,
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))

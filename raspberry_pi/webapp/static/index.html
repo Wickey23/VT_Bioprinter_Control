@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-cal1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-plan1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -35,6 +35,7 @@
         <button class="nav-btn" data-page="camera">Camera</button>
         <button class="nav-btn" data-page="calibration">Calibration</button>
         <button class="nav-btn" data-page="monitor">Monitor</button>
+        <button class="nav-btn" data-page="print">Print</button>
         <button class="nav-btn" data-page="network">Network</button>
         <button class="nav-btn" data-page="system">System</button>
       </nav>
@@ -427,6 +428,47 @@
         </div>
       </section>
 
+      <section id="page-print" class="page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Expected print geometry</p>
+                <h3>Load G-code plan</h3>
+              </div>
+              <span id="planBadge" class="pill">NO PLAN</span>
+            </div>
+            <p>Load the G-code that will be used for an experiment. The controller parses G0/G1 motion, extrusion, layers, and expected geometry. Loading a plan does not execute it.</p>
+            <div class="file-loader">
+              <input id="gcodeFile" type="file" accept=".gcode,.gc,.gco,.txt,text/plain">
+              <button id="loadGcode" class="primary">Load G-code</button>
+              <button id="clearGcode" class="danger-outline">Clear plan</button>
+            </div>
+            <p id="planMessage" class="muted">No print plan loaded.</p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Plan summary</p>
+            <h3>Parsed geometry</h3>
+            <div id="planDetails" class="detail-list"></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Vision comparison</p>
+              <h3>Expected path overlay</h3>
+            </div>
+            <span class="pill">OBSERVE ONLY</span>
+          </div>
+          <p>When both a calibration profile and a G-code plan are loaded, the Monitor page projects the expected extrusion path into the D405 image. This establishes the expected-vs-observed framework without commanding the printer.</p>
+          <div class="locked-controls">
+            <button class="secondary nav-jump" data-target="monitor">Open calibrated monitor</button>
+          </div>
+        </article>
+      </section>
+
       <section id="page-network" class="page">
         <div class="grid two">
           <article class="card">
@@ -525,6 +567,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-cal1"></script>
+  <script src="/static/app.js?v=20261020-plan1"></script>
 </body>
 </html>

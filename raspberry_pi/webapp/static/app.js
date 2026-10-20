@@ -18,7 +18,9 @@ const state={
   monitorSurface:null,
   planSummary:null,
   projectedPlan:null,
-  activeExperiment:null
+  activeExperiment:null,
+  printerPosition:null,
+  printerProjectedPixel:null
 };
 
 async function api(path,opts={}){
@@ -789,6 +791,32 @@ function drawMonitorOverlay(){
     ctx.stroke();
     ctx.restore();
   }
+
+  if(state.printerProjectedPixel){
+    const ctx=canvas.getContext("2d");
+    drawMarker(ctx,state.printerProjectedPixel[0],state.printerProjectedPixel[1],"M114","#a78bfa");
+  }
+}
+
+async function refreshPrinterPosition(){
+  try{
+    const d=await api("/api/monitor/printer-position");
+    state.printerPosition=d.position_mm;
+    state.printerProjectedPixel=d.projected_pixel||null;
+    const p=d.position_mm;
+    $("monitorPrinterDetails").innerHTML=[
+      ["X",Number(p.x).toFixed(3)+" mm"],
+      ["Y",Number(p.y).toFixed(3)+" mm"],
+      ["Z",Number(p.z).toFixed(3)+" mm"],
+      ["Projected",d.projected_pixel?"Visible in camera":"Not projected"]
+    ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+    drawMonitorOverlay();
+    return d;
+  }catch(err){
+    state.printerProjectedPixel=null;
+    $("monitorPrinterDetails").innerHTML='<div><span>Status</span><strong>'+esc(err.message)+'</strong></div>';
+    return null;
+  }
 }
 
 async function startMonitor(){
@@ -802,6 +830,7 @@ async function startMonitor(){
     $("stopMonitor").disabled=false;
     $("monitorPlaceholder").style.display="none";
     monitorLoop(state.monitorGeneration);
+    refreshPrinterPosition().catch(()=>{});
     $("monitorMessage").textContent=state.calibrationProfile
       ?"Observe mode active. Click the image to query printer X/Y/Z."
       :"Camera is live, but calibration is required for printer coordinates.";
@@ -826,9 +855,11 @@ async function stopMonitor(){
   $("monitorImage").removeAttribute("src");
   $("monitorPlaceholder").style.display="";
   $("monitorPlaceholder").textContent="Start the monitor to view calibrated printer coordinates.";
+  state.printerProjectedPixel=null;
 }
 
 async function monitorLoop(generation){
+  let frameCounter=0;
   while(state.monitorActive&&generation===state.monitorGeneration){
     const started=performance.now();
     try{
@@ -843,6 +874,11 @@ async function monitorLoop(generation){
       };
       img.src=url;
       if(old)URL.revokeObjectURL(old);
+
+      frameCounter++;
+      if(frameCounter%10===0){
+        refreshPrinterPosition().catch(()=>{});
+      }
     }catch(err){
       $("monitorMessage").textContent="Monitor frame error: "+err.message;
       await new Promise(resolve=>setTimeout(resolve,500));

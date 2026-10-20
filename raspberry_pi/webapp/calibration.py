@@ -98,6 +98,7 @@ def solve_bed_calibration(
     camera_model: str | None,
     frame_width: int,
     frame_height: int,
+    intrinsics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if len(points) != 4:
         raise ValueError("Exactly four bed-corner points are required.")
@@ -136,6 +137,7 @@ def solve_bed_calibration(
             "model": camera_model,
             "frame_width": int(frame_width),
             "frame_height": int(frame_height),
+            "intrinsics": intrinsics,
         },
         "bed": {
             "origin_x_mm": float(origin_x_mm),
@@ -182,7 +184,7 @@ def save_nozzle_reference(
 
 def analyze_surface(
     profile: dict[str, Any],
-    sample_pixel: Callable[[float, float], dict[str, Any]],
+    sample_pixels: Callable[[list[tuple[float, float]]], list[dict[str, Any]]],
     *,
     columns: int = 12,
     rows: int = 9,
@@ -194,7 +196,7 @@ def analyze_surface(
     uv = np.asarray([[float(p["u"]), float(p["v"])] for p in corners], dtype=float)
     p00, p10, p11, p01 = uv
 
-    samples: list[dict[str, Any]] = []
+    requested_pixels: list[tuple[float, float]] = []
     for row in range(rows):
         ty = (row + 0.5) / rows
         left = (1.0 - ty) * p00 + ty * p01
@@ -203,27 +205,29 @@ def analyze_surface(
         for col in range(columns):
             tx = (col + 0.5) / columns
             pixel = (1.0 - tx) * left + tx * right
+            requested_pixels.append((float(pixel[0]), float(pixel[1])))
 
-            try:
-                sensor = sample_pixel(float(pixel[0]), float(pixel[1]))
-            except Exception:
-                continue
+    sensor_points = sample_pixels(requested_pixels)
+    samples: list[dict[str, Any]] = []
+    for sensor in sensor_points:
+        if not sensor.get("valid", True):
+            continue
 
-            xyz = sensor.get("camera_xyz_m")
-            if not xyz:
-                continue
+        xyz = sensor.get("camera_xyz_m")
+        if not xyz:
+            continue
 
-            printer_xyz = transform_camera_point(profile, xyz)
-            samples.append(
-                {
-                    "u": round(float(pixel[0]), 2),
-                    "v": round(float(pixel[1]), 2),
-                    "x_mm": printer_xyz[0],
-                    "y_mm": printer_xyz[1],
-                    "z_mm": printer_xyz[2],
-                    "depth_m": sensor.get("depth_m"),
-                }
-            )
+        printer_xyz = transform_camera_point(profile, xyz)
+        samples.append(
+            {
+                "u": round(float(sensor["u"]), 2),
+                "v": round(float(sensor["v"]), 2),
+                "x_mm": printer_xyz[0],
+                "y_mm": printer_xyz[1],
+                "z_mm": printer_xyz[2],
+                "depth_m": sensor.get("depth_m"),
+            }
+        )
 
     if not samples:
         raise ValueError("No valid depth samples were available inside the calibrated bed region.")

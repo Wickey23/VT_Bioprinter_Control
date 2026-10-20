@@ -176,3 +176,69 @@ The Camera page can now run one persistent D405 pipeline for both RGB video and 
 - The live feed is for monitoring/commissioning. Closed-loop printer decisions should use validated depth/feature measurements rather than raw RGB pixels alone.
 
 Use **Start live feed** on the Camera page to begin the stream and **Stop live feed** to release the D405 pipeline.
+
+
+## Camera-to-printer calibration and intelligent monitor
+
+The controller now includes a **Calibration** workspace and an **Observe-mode Monitor**.
+
+### Calibration workflow
+
+1. Rigidly mount the D405. Moving the camera after calibration invalidates the transform.
+2. Open **Calibration** and capture a frame.
+3. Verify the physical usable bed dimensions shown in the form.
+4. Click the four bed corners in this printer-coordinate order:
+   - front-left
+   - front-right
+   - rear-right
+   - rear-left
+5. Each click samples aligned D405 depth and deprojects the pixel into a 3D camera-space point.
+6. **Solve & save calibration** performs a four-point rigid Kabsch fit from camera-space coordinates to printer-space X/Y/Z.
+7. The profile stores:
+   - D405 serial/model
+   - camera intrinsics
+   - bed dimensions and image points
+   - 3×3 rotation matrix
+   - translation vector
+   - per-corner fit errors and RMS error
+8. After the bed transform is valid, use **Mark nozzle tip on image** to save a syringe/nozzle reference point in printer coordinates.
+
+Calibration profiles are stored outside the repository under the VT Bioprinter config directory, normally:
+
+```text
+~/.config/vt-bioprinter/calibration/active.json
+```
+
+### Surface map
+
+**Analyze surface** samples a grid across the calibrated bed polygon using one synchronized live depth frame. Each valid sample is transformed into printer coordinates. The controller reports mean Z, RMS Z error, minimum/maximum Z, peak-to-peak variation, and displays a simple deviation overlay.
+
+This is a measurement/commissioning feature. Treat the result as research data until the calibration error has been independently checked against physical measurements.
+
+### Monitor workspace
+
+The **Monitor** page is currently locked to **OBSERVE** behavior:
+- live D405 image
+- calibrated bed outline
+- saved nozzle marker
+- click-to-query printer X/Y/Z coordinates
+- optional surface deviation overlay
+- expected G-code extrusion-path overlay when a plan is loaded
+
+It does not autonomously move, pause, or correct the printer.
+
+## G-code print plan
+
+The **Print** page can load a local G-code file in the browser. The backend parses:
+- G0/G1 motion
+- absolute/relative XYZ modes
+- absolute/relative extrusion modes
+- G92 position resets
+- feed rate
+- estimated layers
+- extrusion-positive path segments
+- XYZ bounds and path lengths
+
+Loading G-code **does not execute it**.
+
+When a valid D405 calibration profile exists, the controller applies the inverse camera/printer transform and stored camera intrinsics to project expected extruding G-code segments into the Monitor camera image. This is the first expected-vs-observed layer for future extrusion-quality analysis.

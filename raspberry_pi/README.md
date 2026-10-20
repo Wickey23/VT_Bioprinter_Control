@@ -280,3 +280,55 @@ Each session records:
 Experiment data is intentionally stored outside the Git repository.
 
 The current controller does **not** automatically move, pause, or correct the printer based on camera data. The sensing/quality pipeline must first be experimentally validated.
+
+
+## Observe-only nozzle tracking
+
+When the nozzle/syringe tip is marked during calibration, the controller now stores a small grayscale visual template around the selected tip. In **Monitor**, an experimental normalized-template-correlation tracker can:
+
+- search around the projected Marlin M114 position when available
+- fall back to the saved tip location
+- recover with a coarse whole-frame search if the local match is weak
+- report visual similarity confidence
+- sample D405 depth at the tracked image location
+- transform the tracked tip into printer X/Y/Z coordinates
+
+This tracker is experimental. Its confidence is a visual similarity score, not a calibrated probability. It is OBSERVE-only and is never used to move the printer.
+
+## Final-surface quality analytics
+
+The **Analytics** page combines:
+
+- saved clean reference surface
+- current D405 depth surface
+- camera-to-printer transform
+- loaded G-code extrusion path
+- user-selected path radius
+- minimum detected deposition height
+- user-selected height tolerance
+
+The controller classifies coarse sampled points as:
+- within tolerance
+- too low
+- too high
+- missing expected deposition
+- excess/off-path deposition
+- background
+
+It reports path coverage, within-tolerance percentage, missing/excess sample counts, mean absolute height error, RMS height error, and an informational NORMAL/WARNING/FAULT advisory.
+
+The advisory is OBSERVE-only. It does not pause, stop, or correct the printer.
+
+## Continuous integration
+
+The repository includes `.github/workflows/controller-ci.yml`, which checks:
+- Python syntax for the controller modules
+- offline calibration/G-code/quality self-tests
+- browser JavaScript syntax
+
+The offline checks can also be run manually on the Pi:
+
+```bash
+cd ~/VT_Bioprinter_Control/raspberry_pi
+./.venv/bin/python controller_self_test.py
+```

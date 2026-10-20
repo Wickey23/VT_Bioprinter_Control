@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-exp1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-baseline1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -367,7 +367,11 @@
               <span id="surfaceBadge" class="pill">READY AFTER CALIBRATION</span>
             </div>
             <p>Sample the calibrated bed region and measure Z deviation from the fitted printer Z=0 plane.</p>
-            <button id="analyzeCalibrationSurface" class="secondary" disabled>Analyze surface</button>
+            <div class="locked-controls">
+              <button id="analyzeCalibrationSurface" class="secondary" disabled>Analyze surface</button>
+              <button id="saveSurfaceBaseline" class="primary" disabled>Save as reference surface</button>
+            </div>
+            <p class="muted">The saved reference surface becomes the zero-height baseline for later deposition-height comparisons.</p>
             <div id="surfaceMetrics" class="sensor-grid compact"></div>
           </article>
         </div>
@@ -608,6 +612,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-exp1"></script>
+  <script src="/static/app.js?v=20261020-baseline1"></script>
 </body>
 </html>

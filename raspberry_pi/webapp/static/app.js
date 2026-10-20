@@ -1,5 +1,10 @@
 const $=id=>document.getElementById(id);
-const state={token:localStorage.getItem("vt_token")||"",ssid:""};
+const state={
+  token:localStorage.getItem("vt_token")||"",
+  ssid:"",
+  commissioning:null,
+  depthObjectUrl:null
+};
 
 async function api(path,opts={}){
   const headers={...(opts.headers||{}),"X-Bioprinter-Token":state.token};
@@ -15,6 +20,11 @@ function pill(el,ok,text){
   el.className="pill "+(ok?"ok":"bad");
 }
 
+function lockBadge(el,unlocked){
+  el.textContent=unlocked?"UNLOCKED":"LOCKED";
+  el.className="lock-badge"+(unlocked?" ok":"");
+}
+
 function esc(s){
   return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 }
@@ -25,22 +35,44 @@ function uptime(s){
   return [d?d+"d":"",h?h+"h":"",m+"m"].filter(Boolean).join(" ");
 }
 
+function meters(v){
+  if(v==null)return "—";
+  if(v<1)return (v*1000).toFixed(1)+" mm";
+  return v.toFixed(3)+" m";
+}
+
 async function status(){
   const s=await api("/api/status");
   $("sidebarDot").classList.add("online");
   $("sidebarStatus").textContent="Controller online";
   $("piState").textContent="ONLINE";
   $("piHost").textContent=s.hostname;
+
   $("printerState").textContent=s.printer.connected?"CONNECTED":"NOT CONNECTED";
   $("printerDevice").textContent=s.printer.device||"Awaiting lab connection";
+
+  $("cameraState").textContent=s.camera.usb_detected?"CONNECTED":"NOT CONNECTED";
+  $("cameraModel").textContent=s.camera.model||(
+    s.camera.usb_detected?"Intel RealSense USB detected":"Awaiting D405"
+  );
+
   $("wifiState").textContent=s.network.ssid||"NOT CONNECTED";
   $("wifiIp").textContent=s.network.ip_address||"No IPv4";
   $("cpuTemp").textContent=s.cpu_temp_c==null?"—":s.cpu_temp_c+" °C";
   $("diskUsed").textContent=s.disk.used_gb+" / "+s.disk.total_gb+" GB";
   $("diskFree").textContent=s.disk.free_gb+" GB";
   $("diskBar").style.width=Math.min(100,s.disk.used_gb/s.disk.total_gb*100)+"%";
+
+  const unlocked=!s.printer.commissioning_locked;
+  lockBadge($("dashboardLockBadge"),unlocked);
+  $("commissioningSummary").textContent=unlocked
+    ?"Commissioning checklist is complete. Only 0.1 mm and 1.0 mm jog tests are enabled."
+    :"Motion remains disabled until the physical commissioning checklist is complete.";
+
   $("heroStatus").textContent=s.printer.connected?"Printer link detected":"Host ready — printer not connected";
-  $("heroSub").textContent=s.printer.connected?"Creality serial interface detected. Motion remains locked.":"Raspberry Pi services are online and waiting for the printer controller.";
+  $("heroSub").textContent=s.printer.connected
+    ?(unlocked?"Creality serial link is live; commissioning jogs are enabled.":"Creality serial link is live; motion remains commissioning-locked.")
+    :"Raspberry Pi services are online and waiting for the printer controller.";
   pill($("heroPill"),true,s.printer.connected?"PRINTER FOUND":"HOST READY");
 
   $("currentSsid").textContent=s.network.ssid||"Not connected";
@@ -65,8 +97,130 @@ async function printer(){
   const rows=p.selected
     ?[["Device",p.selected.device],["Description",p.selected.description],["USB ID",(p.selected.vid||"—")+":"+(p.selected.pid||"—")]]
     :[["Device","—"],["Status","Waiting for Creality/CH340 USB connection"]];
-  rows.push(["Motion","Locked until commissioning"]);
+  rows.push(["Motion",p.commissioning_locked?"Commissioning locked":"Tiny jog tests enabled"]);
   $("printerDetails").innerHTML=rows.map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+}
+
+async function loadCommissioning(){
+  const c=await api("/api/commissioning");
+  state.commissioning=c;
+  document.querySelectorAll("#commissioningChecklist input[data-key]").forEach(input=>{
+    input.checked=!!c[input.dataset.key];
+  });
+  lockBadge($("commissioningBadge"),c.unlocked);
+  lockBadge($("motionBadge"),c.unlocked);
+  document.querySelectorAll(".jog-btn").forEach(b=>b.disabled=!c.unlocked);
+  $("commissioningMessage").textContent=c.unlocked
+    ?"Motion gate is open for 0.1 mm and 1.0 mm X/Y/Z jogs only."
+    :"Complete every checklist item to enable tiny jog tests.";
+  return c;
+}
+
+async function saveCommissioning(){
+  const payload={};
+  document.querySelectorAll("#commissioningChecklist input[data-key]").forEach(input=>{
+    payload[input.dataset.key]=input.checked;
+  });
+  const c=await api("/api/commissioning",{method:"POST",body:JSON.stringify(payload)});
+  await loadCommissioning();
+  await printer();
+  await status();
+  $("commissioningMessage").textContent=c.unlocked
+    ?"Commissioning state saved. Tiny jog controls are now enabled."
+    :"State saved. Motion remains locked until every item is confirmed.";
+}
+
+async function lockMotion(){
+  const payload={
+    motors_connected:false,
+    endstops_verified:false,
+    workspace_clear:false,
+    main_power_ready:false,
+    physical_stop_ready:false
+  };
+  await api("/api/commissioning",{method:"POST",body:JSON.stringify(payload)});
+  await loadCommissioning();
+  await printer();
+  await status();
+}
+
+async function jog(axis,sign){
+  const step=Number($("jogStep").value);
+  const distance=step*Number(sign);
+  $("motionLog").textContent="Sending "+axis+" "+distance+" mm…";
+  try{
+    const d=await api("/api/printer/jog",{
+      method:"POST",
+      body:JSON.stringify({axis,distance_mm:distance,feed_mm_min:300})
+    });
+    $("motionLog").textContent=[
+      "Jog complete: "+d.axis+" "+d.distance_mm+" mm @ "+d.feed_mm_min+" mm/min",
+      ...(d.response||[])
+    ].join("\n");
+  }catch(err){
+    $("motionLog").textContent="ERROR: "+err.message;
+  }
+}
+
+async function camera(){
+  try{
+    const c=await api("/api/camera/status");
+    pill($("cameraBadge"),c.usb_detected,c.usb_detected?"CONNECTED":"NOT CONNECTED");
+    const rows=[
+      ["USB detected",c.usb_detected?"Yes":"No"],
+      ["Model",c.model||"—"],
+      ["Serial",c.serial_number||"—"],
+      ["Firmware",c.firmware||"—"],
+      ["RealSense SDK",c.sdk_available?"Ready":"Not installed / not importable"]
+    ];
+    if(c.usb_lines?.length) rows.push(["USB",c.usb_lines[0]]);
+    $("cameraDetails").innerHTML=rows.map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+    $("cameraMessage").textContent=c.usb_detected&&!c.sdk_available
+      ?"D405 is visible over USB. Run bash install_realsense.sh on the Pi to enable depth frames and measurements."
+      :c.usb_detected?"D405 hardware and RealSense SDK are ready.":"Connect the D405 to a blue USB 3 port on the Raspberry Pi.";
+    $("measureDepth").disabled=!(c.usb_detected&&c.sdk_available);
+    $("refreshDepthImage").disabled=!(c.usb_detected&&c.sdk_available);
+  }catch(err){
+    pill($("cameraBadge"),false,"ERROR");
+    $("cameraMessage").textContent=err.message;
+  }
+}
+
+async function measureDepth(){
+  $("cameraMessage").textContent="Capturing depth measurement…";
+  try{
+    const m=await api("/api/camera/measure");
+    $("depthCenter").textContent=meters(m.center_distance_m);
+    $("depthMedian").textContent=meters(m.roi_median_m);
+    $("depthMin").textContent=meters(m.roi_min_m);
+    $("depthMax").textContent=meters(m.roi_max_m);
+    $("cameraMessage").textContent="Depth sample captured at "+m.width+"×"+m.height+".";
+  }catch(err){
+    $("cameraMessage").textContent=err.message;
+  }
+}
+
+async function refreshDepthImage(){
+  $("cameraMessage").textContent="Capturing depth frame…";
+  try{
+    const r=await fetch("/api/camera/depth.jpg?ts="+Date.now(),{
+      headers:{"X-Bioprinter-Token":state.token},
+      cache:"no-store"
+    });
+    if(!r.ok){
+      const d=await r.json().catch(()=>({}));
+      throw new Error(d.detail||("HTTP "+r.status));
+    }
+    const blob=await r.blob();
+    if(state.depthObjectUrl) URL.revokeObjectURL(state.depthObjectUrl);
+    state.depthObjectUrl=URL.createObjectURL(blob);
+    $("depthImage").src=state.depthObjectUrl;
+    $("depthImage").classList.add("visible");
+    $("depthPlaceholder").style.display="none";
+    $("cameraMessage").textContent="Depth visualization updated.";
+  }catch(err){
+    $("cameraMessage").textContent=err.message;
+  }
 }
 
 async function hotspot(){
@@ -111,14 +265,19 @@ async function saved(){
   });
 }
 
-document.querySelectorAll(".nav-btn").forEach(b=>b.onclick=()=>{
+function activatePage(page){
   document.querySelectorAll(".nav-btn,.page").forEach(x=>x.classList.remove("active"));
-  b.classList.add("active");
-  $("page-"+b.dataset.page).classList.add("active");
-  $("pageTitle").textContent=b.dataset.page[0].toUpperCase()+b.dataset.page.slice(1);
-  if(b.dataset.page==="network"){saved().catch(()=>{});hotspot().catch(()=>{})}
-  if(b.dataset.page==="printer")printer().catch(()=>{});
-});
+  const nav=document.querySelector('.nav-btn[data-page="'+page+'"]');
+  if(nav)nav.classList.add("active");
+  $("page-"+page).classList.add("active");
+  $("pageTitle").textContent=page[0].toUpperCase()+page.slice(1);
+  if(page==="network"){saved().catch(()=>{});hotspot().catch(()=>{})}
+  if(page==="printer"){printer().catch(()=>{});loadCommissioning().catch(()=>{})}
+  if(page==="camera"){camera().catch(()=>{})}
+}
+
+document.querySelectorAll(".nav-btn").forEach(b=>b.onclick=()=>activatePage(b.dataset.page));
+document.querySelectorAll(".nav-jump").forEach(b=>b.onclick=()=>activatePage(b.dataset.target));
 
 document.querySelectorAll(".safe-command").forEach(b=>b.onclick=async()=>{
   try{
@@ -129,14 +288,40 @@ document.querySelectorAll(".safe-command").forEach(b=>b.onclick=async()=>{
   }
 });
 
+document.querySelectorAll(".jog-btn").forEach(b=>b.onclick=()=>jog(b.dataset.axis,b.dataset.sign));
+
+$("saveCommissioning").onclick=()=>saveCommissioning().catch(e=>$("commissioningMessage").textContent=e.message);
+$("lockMotion").onclick=()=>lockMotion().catch(e=>$("commissioningMessage").textContent=e.message);
+
+$("emergencyStop").onclick=async()=>{
+  if(!confirm("Send Marlin M112 emergency stop now?"))return;
+  try{
+    const d=await api("/api/printer/emergency-stop",{method:"POST"});
+    $("motionLog").textContent=d.message;
+  }catch(err){
+    $("motionLog").textContent="ERROR: "+err.message;
+  }
+};
+
+$("refreshCamera").onclick=()=>camera();
+$("measureDepth").onclick=()=>measureDepth();
+$("refreshDepthImage").onclick=()=>refreshDepthImage();
+
 $("scanWifi").onclick=()=>scan().catch(e=>$("wifiList").innerHTML='<p class="error">'+esc(e.message)+'</p>');
 $("manualConnect").onclick=()=>{
   const ssid=$("manualSsid").value.trim();
   if(!ssid){$("manualSsid").focus();return}
   openWifi(ssid);
 };
+
 $("refreshPrinter").onclick=()=>printer();
-$("refreshAll").onclick=()=>{status().catch(()=>{});printer().catch(()=>{});hotspot().catch(()=>{})};
+$("refreshAll").onclick=()=>{
+  status().catch(()=>{});
+  printer().catch(()=>{});
+  camera().catch(()=>{});
+  hotspot().catch(()=>{});
+};
+
 $("cancelWifi").onclick=()=>$("wifiDialog").close();
 
 $("wifiForm").onsubmit=async e=>{
@@ -157,10 +342,8 @@ $("wifiForm").onsubmit=async e=>{
 $("hotspotOn").onclick=async()=>{
   if(!confirm("Start VT-Bioprinter-Setup? Your current Wi-Fi connection to the Pi will drop."))return;
   $("hotspotMessage").textContent="Starting setup hotspot…";
-  try{
-    await api("/api/network/hotspot/enable",{method:"POST"});
-  }catch(_){}
-  $("hotspotMessage").textContent="Now connect your device to VT-Bioprinter-Setup (password: bioprinter), then open http://10.42.0.1:8080";
+  try{await api("/api/network/hotspot/enable",{method:"POST"});}catch(_){}
+  $("hotspotMessage").textContent="Connect to VT-Bioprinter-Setup (password: bioprinter), then open http://10.42.0.1:8080";
 };
 
 $("forgetToken").onclick=()=>{
@@ -175,7 +358,7 @@ $("loginForm").onsubmit=async e=>{
     await api("/api/status");
     localStorage.setItem("vt_token",state.token);
     $("loginOverlay").classList.add("hidden");
-    status();
+    await Promise.allSettled([status(),printer(),camera(),loadCommissioning()]);
   }catch{
     $("loginError").textContent="Access key not accepted.";
   }
@@ -186,7 +369,7 @@ $("loginForm").onsubmit=async e=>{
     try{
       await api("/api/status");
       $("loginOverlay").classList.add("hidden");
-      status();
+      await Promise.allSettled([status(),printer(),camera(),loadCommissioning()]);
     }catch{}
   }
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);

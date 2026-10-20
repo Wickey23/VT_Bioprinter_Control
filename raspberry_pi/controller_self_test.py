@@ -12,6 +12,7 @@ import numpy as np
 from webapp import calibration
 from webapp import print_plan
 from webapp import quality
+from webapp import vision
 
 
 def assert_close(actual: float, expected: float, tol: float, label: str) -> None:
@@ -129,12 +130,44 @@ def test_quality_engine() -> None:
     assert_close(float(result["coverage_percent"]), 100.0, 1e-9, "quality coverage")
 
 
+def test_vision_tracker() -> None:
+    frame = np.zeros((100, 120, 3), dtype=np.uint8)
+    # Build a small asymmetric high-contrast pattern around (70, 45).
+    frame[40:51, 65:76, :] = 40
+    frame[42:49, 67:73, 0] = 230
+    frame[43:48, 69:75, 1] = 180
+    frame[45:50, 66:70, 2] = 120
+
+    gray = (
+        0.299 * frame[40:51, 65:76, 0]
+        + 0.587 * frame[40:51, 65:76, 1]
+        + 0.114 * frame[40:51, 65:76, 2]
+    ).astype(np.uint8)
+
+    template = {
+        "size": 11,
+        "u": 70.0,
+        "v": 45.0,
+        "pixels": gray.reshape(-1).astype(int).tolist(),
+    }
+    result = vision.track_template(
+        frame,
+        template,
+        predicted_pixel=[68.0, 44.0],
+        local_radius=20,
+        coarse_stride=4,
+    )
+    assert_close(float(result["u"]), 70.0, 1.0, "vision tracker u")
+    assert_close(float(result["v"]), 45.0, 1.0, "vision tracker v")
+
+
 def main() -> int:
     tests = [
         ("rigid transform", test_rigid_transform),
         ("G-code parser", test_gcode_parser),
         ("projection math", test_projection_math),
         ("quality engine", test_quality_engine),
+        ("vision tracker", test_vision_tracker),
     ]
     for name, test in tests:
         test()

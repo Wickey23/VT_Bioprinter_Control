@@ -19,11 +19,20 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from serial.tools import list_ports
 
+from webapp.calibration import (
+    analyze_surface,
+    clear_profile,
+    load_profile,
+    save_nozzle_reference,
+    solve_bed_calibration,
+    transform_camera_point,
+)
 from webapp.realsense import (
     capture_color_jpeg,
     capture_depth_jpeg,
     capture_depth_sample,
     live_camera_status,
+    sample_live_pixel,
     start_live_camera,
     stop_live_camera,
     usb_camera_status,
@@ -74,6 +83,33 @@ class JogRequest(BaseModel):
     axis: str = Field(pattern="^[XYZ]$")
     distance_mm: float
     feed_mm_min: int = Field(default=300, ge=60, le=1200)
+
+
+class CalibrationCorner(BaseModel):
+    u: float
+    v: float
+    depth_m: float
+    camera_xyz_m: list[float]
+
+
+class CalibrationSolveRequest(BaseModel):
+    points: list[CalibrationCorner]
+    origin_x_mm: float = 0.0
+    origin_y_mm: float = 0.0
+    width_mm: float = Field(gt=0, le=1000)
+    depth_mm: float = Field(gt=0, le=1000)
+    frame_width: int = Field(gt=0, le=4096)
+    frame_height: int = Field(gt=0, le=4096)
+
+
+class PixelPointRequest(BaseModel):
+    u: float
+    v: float
+
+
+class SurfaceAnalysisRequest(BaseModel):
+    columns: int = Field(default=12, ge=4, le=30)
+    rows: int = Field(default=9, ge=4, le=30)
 
 
 def load_token() -> str:
@@ -616,6 +652,104 @@ def api_camera_measure() -> dict[str, Any]:
         return capture_depth_sample()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.post("/api/camera/pixel", dependencies=[Depends(require_token)])
+def api_camera_pixel(payload: PixelPointRequest) -> dict[str, Any]:
+    try:
+        sample = sample_live_pixel(payload.u, payload.v)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    profile = load_profile()
+    if profile:
+        try:
+            sample["printer_xyz_mm"] = transform_camera_point(profile, sample["camera_xyz_m"])
+        except Exception:
+            pass
+    return sample
+
+
+@app.get("/api/calibration", dependencies=[Depends(require_token)])
+def api_calibration_status() -> dict[str, Any]:
+    return {
+        "profile": load_profile(),
+        "camera": usb_camera_status(),
+        "live": live_camera_status(),
+    }
+
+
+@app.delete("/api/calibration", dependencies=[Depends(require_token)])
+def api_calibration_clear() -> dict[str, Any]:
+    clear_profile()
+    return {"ok": True, "profile": None}
+
+
+@app.post("/api/calibration/solve", dependencies=[Depends(require_token)])
+def api_calibration_solve(payload: CalibrationSolveRequest) -> dict[str, Any]:
+    if len(payload.points) != 4:
+        raise HTTPException(status_code=400, detail="Exactly four corner points are required.")
+
+    camera = usb_camera_status()
+    try:
+        profile = solve_bed_calibration(
+            [point.model_dump() for point in payload.points],
+            origin_x_mm=payload.origin_x_mm,
+            origin_y_mm=payload.origin_y_mm,
+            width_mm=payload.width_mm,
+            depth_mm=payload.depth_mm,
+            camera_serial=camera.get("serial_number"),
+            camera_model=camera.get("model"),
+            frame_width=payload.frame_width,
+            frame_height=payload.frame_height,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"ok": True, "profile": profile}
+
+
+@app.post("/api/calibration/nozzle", dependencies=[Depends(require_token)])
+def api_calibration_nozzle(payload: PixelPointRequest) -> dict[str, Any]:
+    profile = load_profile()
+    if not profile:
+        raise HTTPException(status_code=409, detail="Complete bed calibration before marking the nozzle tip.")
+
+    try:
+        sample = sample_live_pixel(payload.u, payload.v)
+        profile = save_nozzle_reference(
+            profile,
+            pixel_u=sample["u"],
+            pixel_v=sample["v"],
+            camera_xyz_m=sample["camera_xyz_m"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    return {
+        "ok": True,
+        "sample": sample,
+        "profile": profile,
+    }
+
+
+@app.post("/api/calibration/surface", dependencies=[Depends(require_token)])
+def api_calibration_surface(payload: SurfaceAnalysisRequest) -> dict[str, Any]:
+    profile = load_profile()
+    if not profile:
+        raise HTTPException(status_code=409, detail="Complete bed calibration before analyzing the surface.")
+
+    try:
+        result = analyze_surface(
+            profile,
+            sample_live_pixel,
+            columns=payload.columns,
+            rows=payload.rows,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    return result
 
 
 @app.get("/api/camera/depth.jpg", dependencies=[Depends(require_token)])

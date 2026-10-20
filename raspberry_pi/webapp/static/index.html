@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-plan1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-exp1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -36,6 +36,7 @@
         <button class="nav-btn" data-page="calibration">Calibration</button>
         <button class="nav-btn" data-page="monitor">Monitor</button>
         <button class="nav-btn" data-page="print">Print</button>
+        <button class="nav-btn" data-page="experiments">Experiments</button>
         <button class="nav-btn" data-page="network">Network</button>
         <button class="nav-btn" data-page="system">System</button>
       </nav>
@@ -469,6 +470,46 @@
         </article>
       </section>
 
+      <section id="page-experiments" class="page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Research data collection</p>
+                <h3>Experiment session</h3>
+              </div>
+              <span id="experimentBadge" class="pill">IDLE</span>
+            </div>
+            <label class="stacked-label">Experiment name
+              <input id="experimentName" type="text" value="Bioprinter experiment" maxlength="128">
+            </label>
+            <div class="locked-controls">
+              <button id="startExperiment" class="primary">Start experiment</button>
+              <button id="captureExperimentSnapshot" class="secondary" disabled>Capture RGB + depth snapshot</button>
+              <button id="stopExperiment" class="danger-outline" disabled>Stop experiment</button>
+            </div>
+            <p id="experimentMessage" class="muted">Experiments run in OBSERVE mode and do not command the printer.</p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Active session</p>
+            <h3>Metadata</h3>
+            <div id="experimentDetails" class="detail-list"></div>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Saved research runs</p>
+              <h3>Recent experiments</h3>
+            </div>
+            <button id="refreshExperiments" class="secondary">Refresh</button>
+          </div>
+          <div id="recentExperiments" class="experiment-list"></div>
+        </article>
+      </section>
+
       <section id="page-network" class="page">
         <div class="grid two">
           <article class="card">
@@ -567,6 +608,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-plan1"></script>
+  <script src="/static/app.js?v=20261020-exp1"></script>
 </body>
 </html>

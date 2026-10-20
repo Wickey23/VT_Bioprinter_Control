@@ -242,3 +242,41 @@ The **Print** page can load a local G-code file in the browser. The backend pars
 Loading G-code **does not execute it**.
 
 When a valid D405 calibration profile exists, the controller applies the inverse camera/printer transform and stored camera intrinsics to project expected extruding G-code segments into the Monitor camera image. This is the first expected-vs-observed layer for future extrusion-quality analysis.
+
+
+## Reference surface and deposition-height comparison
+
+After camera-to-printer calibration, the Calibration page can save a clean **reference surface**. The baseline stores a synchronized grid of printer-space Z measurements across the calibrated bed region.
+
+Later surface scans use the same grid and report:
+- current printer-space Z
+- baseline Z
+- per-sample ΔZ
+- mean/RMS ΔZ
+- maximum/minimum ΔZ
+- positive-height sample count
+
+This creates the first depth-based deposition-height measurement layer. The overlay uses ΔZ when a compatible baseline exists. It is still an observe-only research measurement and must be physically validated before it is used for automatic correction.
+
+## Experiment recording
+
+The **Experiments** page creates research sessions under:
+
+```text
+~/.local/share/vt-bioprinter/experiments/
+```
+
+Each session records:
+- start/end time
+- OBSERVE operating mode
+- calibration metadata
+- active G-code plan metadata
+- coordinate-probe events
+- surface-scan summary events
+- reference-baseline events
+- synchronized RGB + depth JPEG snapshots
+- center depth measurement associated with each snapshot
+
+Experiment data is intentionally stored outside the Git repository.
+
+The current controller does **not** automatically move, pause, or correct the printer based on camera data. The sensing/quality pipeline must first be experimentally validated.

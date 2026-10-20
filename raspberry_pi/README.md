@@ -332,3 +332,16 @@ The offline checks can also be run manually on the Pi:
 cd ~/VT_Bioprinter_Control/raspberry_pi
 ./.venv/bin/python controller_self_test.py
 ```
+
+
+## Updating the controller safely
+
+After pulling new controller code, use the validation script rather than restarting blindly:
+
+```bash
+cd ~/VT_Bioprinter_Control
+git pull
+bash raspberry_pi/update_controller.sh
+```
+
+It syncs Python dependencies, compiles the controller modules, runs the offline calibration/G-code/quality/vision self-tests, restarts the systemd web service, and performs local health/camera API checks.

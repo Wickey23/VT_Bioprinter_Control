@@ -73,8 +73,39 @@ echo "Connected USB devices:"
 lsusb | grep -Ei 'realsense|8086:' || true
 
 echo
+echo "Running D405 depth sanity check..."
+"$PYTHON" - <<'PY'
+import pyrealsense2 as rs
+pipeline = rs.pipeline()
+config = rs.config()
+config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 15)
+started = False
+try:
+    pipeline.start(config)
+    started = True
+    frames = None
+    for _ in range(5):
+        frames = pipeline.wait_for_frames(5000)
+    depth = frames.get_depth_frame() if frames else None
+    if not depth:
+        raise RuntimeError("No depth frame received from D405")
+    w, h = depth.get_width(), depth.get_height()
+    d = depth.get_distance(w // 2, h // 2)
+    print(f"D405 depth stream OK: {w}x{h}, center={d:.4f} m")
+finally:
+    if started:
+        pipeline.stop()
+PY
+
+echo
 echo "Restarting the VT Bioprinter web controller..."
 sudo systemctl restart vt-bioprinter-web.service
+sleep 2
+
+echo
+echo "Web controller camera status:"
+curl -fsS -H "X-Bioprinter-Token: enter" http://127.0.0.1:8080/api/camera/status || true
+echo
 
 echo
 echo "RealSense setup complete."

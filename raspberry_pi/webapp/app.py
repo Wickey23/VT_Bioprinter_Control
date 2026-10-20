@@ -77,7 +77,7 @@ HOTSPOT_PASSWORD = "bioprinter"
 HOTSPOT_IP = "10.42.0.1"
 HOTSPOT_URL = f"http://{HOTSPOT_IP}:8080"
 
-app = FastAPI(title="VT Bioprinter Controller", version="0.3.0")
+app = FastAPI(title="VT Bioprinter Controller", version="0.4.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

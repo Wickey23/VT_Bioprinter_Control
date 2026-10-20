@@ -182,6 +182,84 @@ def save_nozzle_reference(
     return save_profile(profile)
 
 
+def save_surface_baseline(
+    profile: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    baseline = {
+        "captured_at_unix": int(time.time()),
+        "grid": result.get("grid"),
+        "sample_count": result.get("sample_count"),
+        "mean_z_mm": result.get("mean_z_mm"),
+        "rms_z_mm": result.get("rms_z_mm"),
+        "min_z_mm": result.get("min_z_mm"),
+        "max_z_mm": result.get("max_z_mm"),
+        "peak_to_peak_mm": result.get("peak_to_peak_mm"),
+        "samples": [
+            {
+                "u": sample.get("u"),
+                "v": sample.get("v"),
+                "x_mm": sample.get("x_mm"),
+                "y_mm": sample.get("y_mm"),
+                "z_mm": sample.get("z_mm"),
+            }
+            for sample in result.get("samples", [])
+        ],
+    }
+    profile["surface_baseline"] = baseline
+    return save_profile(profile)
+
+
+def compare_surface_to_baseline(
+    profile: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    baseline = profile.get("surface_baseline")
+    if not baseline:
+        result["baseline_available"] = False
+        return result
+
+    if baseline.get("grid") != result.get("grid"):
+        result["baseline_available"] = True
+        result["baseline_compatible"] = False
+        return result
+
+    baseline_samples = baseline.get("samples", [])
+    current_samples = result.get("samples", [])
+    if len(baseline_samples) != len(current_samples):
+        result["baseline_available"] = True
+        result["baseline_compatible"] = False
+        return result
+
+    deltas: list[float] = []
+    for current, base in zip(current_samples, baseline_samples):
+        delta = float(current["z_mm"]) - float(base["z_mm"])
+        current["baseline_z_mm"] = round(float(base["z_mm"]), 4)
+        current["delta_z_mm"] = round(delta, 4)
+        deltas.append(delta)
+
+    if not deltas:
+        result["baseline_available"] = True
+        result["baseline_compatible"] = False
+        return result
+
+    arr = np.asarray(deltas, dtype=float)
+    positive = arr[arr > 0]
+    result["baseline_available"] = True
+    result["baseline_compatible"] = True
+    result["deposition"] = {
+        "mean_delta_z_mm": round(float(arr.mean()), 4),
+        "rms_delta_z_mm": round(float(math.sqrt(float(np.mean(arr**2)))), 4),
+        "min_delta_z_mm": round(float(arr.min()), 4),
+        "max_delta_z_mm": round(float(arr.max()), 4),
+        "positive_sample_count": int((arr > 0).sum()),
+        "mean_positive_height_mm": (
+            round(float(positive.mean()), 4) if positive.size else 0.0
+        ),
+    }
+    return result
+
+
 def analyze_surface(
     profile: dict[str, Any],
     sample_pixels: Callable[[list[tuple[float, float]]], list[dict[str, Any]]],
@@ -236,7 +314,7 @@ def analyze_surface(
     mean = float(z.mean())
     rms = float(math.sqrt(float(np.mean(z**2))))
 
-    return {
+    result = {
         "sample_count": len(samples),
         "grid": {"columns": columns, "rows": rows},
         "mean_z_mm": round(mean, 4),
@@ -246,3 +324,4 @@ def analyze_surface(
         "peak_to_peak_mm": round(float(z.max() - z.min()), 4),
         "samples": samples,
     }
+    return compare_surface_to_baseline(profile, result)

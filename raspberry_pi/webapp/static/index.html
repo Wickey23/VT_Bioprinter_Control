@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-pos1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-quality1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -37,6 +37,7 @@
         <button class="nav-btn" data-page="monitor">Monitor</button>
         <button class="nav-btn" data-page="print">Print</button>
         <button class="nav-btn" data-page="experiments">Experiments</button>
+        <button class="nav-btn" data-page="analytics">Analytics</button>
         <button class="nav-btn" data-page="network">Network</button>
         <button class="nav-btn" data-page="system">System</button>
       </nav>
@@ -522,6 +523,70 @@
         </article>
       </section>
 
+      <section id="page-analytics" class="page">
+        <div class="status-banner">
+          <div>
+            <span class="status-label">QUALITY ANALYSIS</span>
+            <h2>Expected vs observed surface</h2>
+            <p>Observe-only comparison of D405 deposition height against the loaded G-code geometry.</p>
+          </div>
+          <div id="qualityReadinessBadge" class="pill">CHECKING</div>
+        </div>
+
+        <div class="grid two">
+          <article class="card">
+            <p class="eyebrow">Analysis settings</p>
+            <h3>Final surface comparison</h3>
+            <div class="calibration-form">
+              <label>Path radius (mm)<input id="qualityPathRadius" type="number" step="0.1" min="0.1" value="2.0"></label>
+              <label>Minimum deposition height (mm)<input id="qualityMinHeight" type="number" step="0.05" min="0" value="0.10"></label>
+              <label>Height tolerance ± (mm)<input id="qualityHeightTolerance" type="number" step="0.05" min="0.05" value="0.50"></label>
+              <label>Grid<input value="14 × 10 samples" disabled></label>
+            </div>
+            <div class="locked-controls">
+              <button id="runQualityAnalysis" class="primary" disabled>Run quality scan</button>
+            </div>
+            <p id="qualityMessage" class="muted">Requires camera calibration, a saved reference surface, and loaded G-code.</p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Quality metrics</p>
+            <h3>Latest analysis</h3>
+            <div class="sensor-grid">
+              <div><span>Path coverage</span><strong id="qualityCoverage">—</strong></div>
+              <div><span>Within tolerance</span><strong id="qualityToleranceRate">—</strong></div>
+              <div><span>Missing samples</span><strong id="qualityMissing">—</strong></div>
+              <div><span>Excess samples</span><strong id="qualityExcess">—</strong></div>
+              <div><span>Mean |height error|</span><strong id="qualityMeanAbs">—</strong></div>
+              <div><span>RMS height error</span><strong id="qualityRms">—</strong></div>
+            </div>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Spatial quality map</p>
+              <h3>D405 final-surface analysis</h3>
+            </div>
+            <span class="pill">OBSERVE ONLY</span>
+          </div>
+          <div class="quality-legend">
+            <span><i class="q-ok"></i> Within tolerance</span>
+            <span><i class="q-low"></i> Too low</span>
+            <span><i class="q-high"></i> Too high</span>
+            <span><i class="q-missing"></i> Missing</span>
+            <span><i class="q-excess"></i> Excess/off-path</span>
+          </div>
+          <div class="camera-stage calibration-stage" id="qualityStage">
+            <img id="qualityImage" alt="D405 quality analysis frame" />
+            <canvas id="qualityCanvas"></canvas>
+            <div id="qualityPlaceholder">Run a quality scan to generate a spatial map.</div>
+          </div>
+          <p class="muted">G-code Z is currently used as an expected-height proxy. These metrics must be validated against physical measurements for the specific bioink and process before any automatic printer decision uses them.</p>
+        </article>
+      </section>
+
       <section id="page-network" class="page">
         <div class="grid two">
           <article class="card">
@@ -620,6 +685,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-pos1"></script>
+  <script src="/static/app.js?v=20261020-quality1"></script>
 </body>
 </html>

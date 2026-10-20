@@ -19,7 +19,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from serial.tools import list_ports
 
-from webapp.realsense import capture_depth_jpeg, capture_depth_sample, usb_camera_status
+from webapp.realsense import (
+    capture_color_jpeg,
+    capture_depth_jpeg,
+    capture_depth_sample,
+    live_camera_status,
+    start_live_camera,
+    stop_live_camera,
+    usb_camera_status,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -573,6 +581,33 @@ def api_printer_port_owner() -> dict[str, Any]:
 @app.get("/api/camera/status", dependencies=[Depends(require_token)])
 def api_camera_status() -> dict[str, Any]:
     return usb_camera_status()
+
+
+@app.get("/api/camera/live/status", dependencies=[Depends(require_token)])
+def api_camera_live_status() -> dict[str, Any]:
+    return live_camera_status()
+
+
+@app.post("/api/camera/live/start", dependencies=[Depends(require_token)])
+def api_camera_live_start() -> dict[str, Any]:
+    status = start_live_camera()
+    if status.get("error"):
+        raise HTTPException(status_code=503, detail=status["error"])
+    return status
+
+
+@app.post("/api/camera/live/stop", dependencies=[Depends(require_token)])
+def api_camera_live_stop() -> dict[str, Any]:
+    return stop_live_camera()
+
+
+@app.get("/api/camera/color.jpg", dependencies=[Depends(require_token)])
+def api_camera_color_image() -> Response:
+    try:
+        data = capture_color_jpeg()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/camera/measure", dependencies=[Depends(require_token)])

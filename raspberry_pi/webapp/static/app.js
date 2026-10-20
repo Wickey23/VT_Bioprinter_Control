@@ -1201,6 +1201,11 @@ function renderQualityResult(result){
   $("qualityExcess").textContent=result.excess_off_path_samples??"—";
   $("qualityMeanAbs").textContent=result.mean_abs_height_error_mm==null?"—":Number(result.mean_abs_height_error_mm).toFixed(3)+" mm";
   $("qualityRms").textContent=result.rms_height_error_mm==null?"—":Number(result.rms_height_error_mm).toFixed(3)+" mm";
+  const advisory=result.advisory_status||"NO DATA";
+  const ok=advisory==="NORMAL";
+  $("qualityAdvisoryBadge").textContent=advisory;
+  $("qualityAdvisoryBadge").className="pill "+(ok?"ok":advisory==="WARNING"?"":"bad");
+  $("qualityAdvisoryReasons").textContent=(result.advisory_reasons||[]).join(" ");
   drawQualityOverlay();
 }
 

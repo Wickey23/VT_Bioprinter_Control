@@ -247,13 +247,33 @@
           </article>
         </div>
 
+        <article class="card live-camera-card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Live RGB camera</p>
+              <h3>What the D405 sees</h3>
+            </div>
+            <span id="liveCameraBadge" class="pill">STOPPED</span>
+          </div>
+          <div class="live-toolbar">
+            <button id="startLiveCamera" class="primary">Start live feed</button>
+            <button id="stopLiveCamera" class="secondary" disabled>Stop live feed</button>
+            <span id="liveCameraStats" class="muted">640×480 · target 15 FPS</span>
+          </div>
+          <div class="camera-stage live-stage">
+            <img id="colorImage" alt="Live RealSense D405 RGB camera view" />
+            <div id="colorPlaceholder">Start the live feed to see the camera view.</div>
+          </div>
+          <p class="muted camera-note">The live view uses the D405 left global-shutter imager through its onboard ISP. Depth sensing continues in the same camera pipeline.</p>
+        </article>
+
         <article class="card">
           <div class="card-title">
             <div>
               <p class="eyebrow">Depth visualization</p>
-              <h3>Latest D405 frame</h3>
+              <h3>Latest D405 depth frame</h3>
             </div>
-            <button id="refreshDepthImage" class="secondary">Capture frame</button>
+            <button id="refreshDepthImage" class="secondary">Capture depth frame</button>
           </div>
           <div class="camera-stage">
             <img id="depthImage" alt="RealSense D405 depth visualization" />

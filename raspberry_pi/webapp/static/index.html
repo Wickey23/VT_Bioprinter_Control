@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-live3" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-cal1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -33,6 +33,8 @@
         <button class="nav-btn active" data-page="dashboard">Dashboard</button>
         <button class="nav-btn" data-page="printer">Printer</button>
         <button class="nav-btn" data-page="camera">Camera</button>
+        <button class="nav-btn" data-page="calibration">Calibration</button>
+        <button class="nav-btn" data-page="monitor">Monitor</button>
         <button class="nav-btn" data-page="network">Network</button>
         <button class="nav-btn" data-page="system">System</button>
       </nav>
@@ -282,6 +284,149 @@
         </article>
       </section>
 
+      <section id="page-calibration" class="page">
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Camera → printer coordinates</p>
+                <h3>Calibration status</h3>
+              </div>
+              <span id="calibrationBadge" class="pill">NOT CALIBRATED</span>
+            </div>
+            <div id="calibrationDetails" class="detail-list"></div>
+            <p id="calibrationMessage" class="muted">Capture a camera frame, then click the four bed corners in printer-coordinate order.</p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Printer bed geometry</p>
+            <h3>Reference dimensions</h3>
+            <div class="calibration-form">
+              <label>Origin X (mm)<input id="calOriginX" type="number" step="0.1" value="0"></label>
+              <label>Origin Y (mm)<input id="calOriginY" type="number" step="0.1" value="0"></label>
+              <label>Bed width X (mm)<input id="calBedWidth" type="number" step="0.1" value="220"></label>
+              <label>Bed depth Y (mm)<input id="calBedDepth" type="number" step="0.1" value="220"></label>
+            </div>
+            <p class="muted">220 × 220 mm is prefilled for the Ender-3 V2 base. Verify the actual usable bioprinter workspace before solving.</p>
+          </article>
+        </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h3>Capture and mark the print bed</h3>
+            </div>
+            <span id="calibrationPointStatus" class="pill">0 / 4 POINTS</span>
+          </div>
+          <div class="live-toolbar">
+            <button id="captureCalibrationFrame" class="primary">Capture calibration frame</button>
+            <button id="resetCalibrationPoints" class="secondary">Reset points</button>
+            <button id="solveCalibration" class="secondary" disabled>Solve & save calibration</button>
+            <button id="clearCalibration" class="danger-outline">Clear saved calibration</button>
+          </div>
+          <div class="calibration-instructions">
+            Click in this order:
+            <strong>1 Front-left</strong> →
+            <strong>2 Front-right</strong> →
+            <strong>3 Rear-right</strong> →
+            <strong>4 Rear-left</strong>.
+          </div>
+          <div class="camera-stage calibration-stage" id="calibrationStage">
+            <img id="calibrationImage" alt="D405 calibration frame" />
+            <canvas id="calibrationCanvas"></canvas>
+            <div id="calibrationPlaceholder">Capture a frame to begin bed calibration.</div>
+          </div>
+          <div id="calibrationPointList" class="calibration-point-list"></div>
+        </article>
+
+        <div class="grid two">
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Step 2</p>
+                <h3>Nozzle / syringe-tip reference</h3>
+              </div>
+              <span id="nozzleBadge" class="pill">NOT SET</span>
+            </div>
+            <p>After bed calibration, capture a fresh frame and mark the visible syringe/nozzle tip. The system will convert it directly into printer X/Y/Z coordinates.</p>
+            <div class="locked-controls">
+              <button id="markNozzleTip" class="primary" disabled>Mark nozzle tip on image</button>
+            </div>
+            <div id="nozzleDetails" class="detail-list"></div>
+          </article>
+
+          <article class="card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Step 3</p>
+                <h3>Reference surface analysis</h3>
+              </div>
+              <span id="surfaceBadge" class="pill">READY AFTER CALIBRATION</span>
+            </div>
+            <p>Sample the calibrated bed region and measure Z deviation from the fitted printer Z=0 plane.</p>
+            <button id="analyzeCalibrationSurface" class="secondary" disabled>Analyze surface</button>
+            <div id="surfaceMetrics" class="sensor-grid compact"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-monitor" class="page">
+        <div class="status-banner monitor-banner">
+          <div>
+            <span class="status-label">INTELLIGENT MONITORING</span>
+            <h2>Observe mode</h2>
+            <p>Live camera + calibrated printer coordinates. No autonomous printer actions are enabled.</p>
+          </div>
+          <div class="pill ok">OBSERVE</div>
+        </div>
+
+        <div class="grid two monitor-grid">
+          <article class="card monitor-view-card">
+            <div class="card-title">
+              <div>
+                <p class="eyebrow">Calibrated live view</p>
+                <h3>RGB + spatial overlay</h3>
+              </div>
+              <span id="monitorCameraBadge" class="pill">STOPPED</span>
+            </div>
+            <div class="live-toolbar">
+              <button id="startMonitor" class="primary">Start monitor</button>
+              <button id="stopMonitor" class="secondary" disabled>Stop monitor</button>
+              <button id="monitorSurfaceScan" class="secondary" disabled>Scan surface</button>
+            </div>
+            <div class="camera-stage calibration-stage monitor-stage">
+              <img id="monitorImage" alt="Calibrated live printer camera" />
+              <canvas id="monitorCanvas"></canvas>
+              <div id="monitorPlaceholder">Start the monitor to view calibrated printer coordinates.</div>
+            </div>
+            <p id="monitorMessage" class="muted">Calibration is required before spatial overlays are meaningful.</p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Live coordinate probe</p>
+            <h3>Printer-space measurement</h3>
+            <div class="sensor-grid">
+              <div><span>X</span><strong id="monitorX">—</strong></div>
+              <div><span>Y</span><strong id="monitorY">—</strong></div>
+              <div><span>Z</span><strong id="monitorZ">—</strong></div>
+              <div><span>Depth</span><strong id="monitorDepth">—</strong></div>
+            </div>
+            <p class="muted">Click anywhere in the live image to measure the corresponding 3D point in printer coordinates.</p>
+
+            <div class="monitor-section">
+              <p class="eyebrow">Calibration</p>
+              <div id="monitorCalibrationDetails" class="detail-list"></div>
+            </div>
+
+            <div class="monitor-section">
+              <p class="eyebrow">Surface map</p>
+              <div id="monitorSurfaceDetails" class="detail-list"></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section id="page-network" class="page">
         <div class="grid two">
           <article class="card">
@@ -380,6 +525,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-live3"></script>
+  <script src="/static/app.js?v=20261020-cal1"></script>
 </body>
 </html>

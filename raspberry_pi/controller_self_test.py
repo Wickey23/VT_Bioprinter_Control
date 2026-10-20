@@ -11,6 +11,7 @@ import numpy as np
 
 from webapp import calibration
 from webapp import print_plan
+from webapp import quality
 
 
 def assert_close(actual: float, expected: float, tol: float, label: str) -> None:
@@ -92,11 +93,48 @@ def test_projection_math() -> None:
     assert_close(pixel[1], 240.0, 1e-9, "projected v")
 
 
+def test_quality_engine() -> None:
+    plan = {
+        "segments": [
+            {
+                "start": [0.0, 0.0, 1.0],
+                "end": [10.0, 0.0, 1.0],
+                "extruding": True,
+            }
+        ]
+    }
+    surface = {
+        "baseline_compatible": True,
+        "deposition": {},
+        "samples": [
+            {
+                "u": 10.0,
+                "v": 10.0,
+                "x_mm": 5.0,
+                "y_mm": 0.1,
+                "z_mm": 1.0,
+                "delta_z_mm": 1.0,
+            }
+        ],
+    }
+    result = quality.analyze_final_surface_quality(
+        surface,
+        plan,
+        path_radius_mm=1.0,
+        min_deposition_height_mm=0.1,
+        height_tolerance_mm=0.2,
+    )
+    if result["advisory_status"] != "NORMAL":
+        raise AssertionError("Expected NORMAL synthetic quality advisory")
+    assert_close(float(result["coverage_percent"]), 100.0, 1e-9, "quality coverage")
+
+
 def main() -> int:
     tests = [
         ("rigid transform", test_rigid_transform),
         ("G-code parser", test_gcode_parser),
         ("projection math", test_projection_math),
+        ("quality engine", test_quality_engine),
     ]
     for name, test in tests:
         test()

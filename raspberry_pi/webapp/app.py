@@ -45,6 +45,7 @@ from webapp.print_plan import (
     project_camera_point,
     project_plan,
 )
+from webapp.quality import analyze_final_surface_quality
 from webapp.realsense import (
     capture_color_jpeg,
     capture_depth_jpeg,
@@ -138,6 +139,14 @@ class PlanLoadRequest(BaseModel):
 
 class ExperimentStartRequest(BaseModel):
     name: str = Field(default="Bioprinter experiment", min_length=1, max_length=128)
+
+
+class QualityAnalysisRequest(BaseModel):
+    columns: int = Field(default=14, ge=6, le=30)
+    rows: int = Field(default=10, ge=6, le=30)
+    path_radius_mm: float = Field(default=2.0, gt=0, le=20)
+    min_deposition_height_mm: float = Field(default=0.10, ge=0, le=20)
+    height_tolerance_mm: float = Field(default=0.50, gt=0, le=20)
 
 
 def load_token() -> str:
@@ -899,6 +908,41 @@ def api_experiment_stop() -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"ok": True, "experiment": metadata}
+
+
+@app.post("/api/quality/final-surface", dependencies=[Depends(require_token)])
+def api_quality_final_surface(payload: QualityAnalysisRequest) -> dict[str, Any]:
+    profile = load_profile()
+    plan = load_plan()
+    if not profile:
+        raise HTTPException(status_code=409, detail="Camera-to-printer calibration is required.")
+    if not profile.get("surface_baseline"):
+        raise HTTPException(status_code=409, detail="Save a clean reference surface before quality analysis.")
+    if not plan:
+        raise HTTPException(status_code=409, detail="Load the G-code print plan before quality analysis.")
+
+    try:
+        surface = analyze_surface(
+            profile,
+            sample_live_pixels,
+            columns=payload.columns,
+            rows=payload.rows,
+        )
+        result = analyze_final_surface_quality(
+            surface,
+            plan,
+            path_radius_mm=payload.path_radius_mm,
+            min_deposition_height_mm=payload.min_deposition_height_mm,
+            height_tolerance_mm=payload.height_tolerance_mm,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    log_event(
+        "final_surface_quality",
+        {key: value for key, value in result.items() if key != "points"},
+    )
+    return result
 
 
 @app.get("/api/plan", dependencies=[Depends(require_token)])

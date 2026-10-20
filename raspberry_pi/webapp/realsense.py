@@ -68,6 +68,7 @@ class RealSenseLiveManager:
         self._depth_resolution: str = "640x480"
         self._target_fps: int = 15
         self._latest_depth_raw = None
+        self._latest_view_rgb = None
         self._depth_intrinsics = None
         self._depth_scale: float | None = None
         self._intrinsics_info: dict[str, Any] | None = None
@@ -82,6 +83,7 @@ class RealSenseLiveManager:
                 "color_ready": self._latest_color_jpeg is not None,
                 "depth_ready": self._latest_depth_jpeg is not None,
                 "sample_ready": self._latest_depth_raw is not None and self._depth_intrinsics is not None,
+                "tracking_ready": self._latest_view_rgb is not None,
                 "last_frame_at": self._last_frame_at,
                 "fps": round(self._fps, 1),
                 "stream": f"{self._view_mode} + depth",
@@ -103,6 +105,7 @@ class RealSenseLiveManager:
             self._latest_depth_jpeg = None
             self._latest_measurement = None
             self._latest_depth_raw = None
+            self._latest_view_rgb = None
             self._depth_intrinsics = None
             self._depth_scale = None
             self._intrinsics_info = None
@@ -131,6 +134,7 @@ class RealSenseLiveManager:
             "color_ready": self._latest_color_jpeg is not None,
             "depth_ready": self._latest_depth_jpeg is not None,
             "sample_ready": self._latest_depth_raw is not None and self._depth_intrinsics is not None,
+            "tracking_ready": self._latest_view_rgb is not None,
             "last_frame_at": self._last_frame_at,
             "fps": round(self._fps, 1),
             "stream": f"{self._view_mode} + depth",
@@ -161,6 +165,42 @@ class RealSenseLiveManager:
         with self._lock:
             return dict(self._latest_measurement) if self._latest_measurement else None
 
+
+    def latest_view_rgb(self):
+        with self._lock:
+            return self._latest_view_rgb.copy() if self._latest_view_rgb is not None else None
+
+    def capture_template(self, u: float, v: float, size: int = 31) -> dict[str, Any]:
+        import numpy as np
+
+        if size < 9 or size > 81 or size % 2 == 0:
+            raise ValueError("Template size must be an odd number between 9 and 81.")
+
+        with self._lock:
+            if self._latest_view_rgb is None:
+                raise RuntimeError("No live camera image is available.")
+            frame = self._latest_view_rgb.copy()
+
+        height, width = frame.shape[:2]
+        x = int(round(max(0, min(width - 1, float(u)))))
+        y = int(round(max(0, min(height - 1, float(v)))))
+        half = size // 2
+        if x - half < 0 or y - half < 0 or x + half >= width or y + half >= height:
+            raise ValueError("Selected nozzle point is too close to the image edge for template capture.")
+
+        patch = frame[y-half:y+half+1, x-half:x+half+1]
+        gray = (
+            0.299 * patch[:, :, 0]
+            + 0.587 * patch[:, :, 1]
+            + 0.114 * patch[:, :, 2]
+        ).astype(np.uint8)
+
+        return {
+            "size": int(size),
+            "u": float(x),
+            "v": float(y),
+            "pixels": gray.reshape(-1).astype(int).tolist(),
+        }
 
     def sample_pixel(self, u: float, v: float, radius: int = 2) -> dict[str, Any]:
         try:
@@ -393,6 +433,7 @@ class RealSenseLiveManager:
                 with self._lock:
                     self._latest_color_jpeg = color_jpeg
                     self._latest_depth_jpeg = depth_jpeg
+                    self._latest_view_rgb = view_rgb.copy()
                     self._latest_measurement = measurement
                     self._latest_depth_raw = depth_raw
                     self._depth_intrinsics = depth_intrinsics
@@ -488,6 +529,33 @@ def stop_live_camera() -> dict[str, Any]:
 
 def live_camera_status() -> dict[str, Any]:
     return LIVE_CAMERA.status()
+
+
+def latest_live_rgb():
+    if not LIVE_CAMERA.status()["running"]:
+        status = LIVE_CAMERA.start()
+        if status.get("error"):
+            raise RuntimeError(status["error"])
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        frame = LIVE_CAMERA.latest_view_rgb()
+        if frame is not None:
+            return frame
+        time.sleep(0.05)
+    raise RuntimeError("Timed out waiting for a D405 live image.")
+
+
+def capture_live_template(u: float, v: float, size: int = 31) -> dict[str, Any]:
+    if not LIVE_CAMERA.status()["running"]:
+        status = LIVE_CAMERA.start()
+        if status.get("error"):
+            raise RuntimeError(status["error"])
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if LIVE_CAMERA.status().get("tracking_ready"):
+            return LIVE_CAMERA.capture_template(u, v, size=size)
+        time.sleep(0.05)
+    raise RuntimeError("Timed out waiting for a D405 image for nozzle template capture.")
 
 
 def sample_live_pixel(u: float, v: float, radius: int = 2) -> dict[str, Any]:

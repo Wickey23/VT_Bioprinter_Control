@@ -124,3 +124,41 @@ Behavior:
 The Network page also includes a manual **Start setup hotspot** control. Starting it intentionally disconnects the Pi from its current Wi-Fi because the built-in Wi-Fi adapter is being switched into access-point mode.
 
 This hotspot is for local/direct controller access. It should not be treated as an internet-facing management interface.
+
+
+## Intel RealSense D405 sensing
+
+The web controller includes a Camera page for the lab's Intel RealSense D405. USB presence is detected immediately with `lsusb`. Depth-frame capture requires librealsense and its Python bindings.
+
+Connect the D405 to a blue USB 3 port on the Raspberry Pi, then install the sensing stack:
+
+```bash
+cd ~/VT_Bioprinter_Control
+git pull
+cd raspberry_pi
+bash install_realsense.sh
+```
+
+The RealSense source build is intentionally separate from the normal web-controller install because it can take substantially longer on a Raspberry Pi 4.
+
+After installation, the Camera page can:
+- identify the RealSense device
+- report model / serial / firmware when available
+- capture a colorized depth frame
+- report center-pixel distance
+- report median/min/max depth over a 21×21 center ROI
+
+The initial depth measurements are commissioning data only. They are not yet calibrated as nozzle-to-bed or layer-height measurements.
+
+## Motion commissioning controls
+
+The Printer page now includes guarded 0.1 mm and 1.0 mm X/Y/Z jog tests. Motion stays locked until the operator explicitly confirms:
+- X/Y/Z motors are connected correctly
+- X/Y/Z endstop states were physically verified with `M119`
+- the workspace is clear
+- printer main power is ready
+- a physical power-off / emergency stop is immediately reachable
+
+Homing remains intentionally unavailable during this commissioning stage. Syringe motion remains locked until the syringe driver mapping and calibration are verified.
+
+The dashboard also provides an `M112` software emergency-stop button. A software stop is not a substitute for cutting printer power in a hardware emergency.

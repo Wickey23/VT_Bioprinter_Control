@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1220" />
   <title>VT Bioprinter Controller</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/styles.css?v=20261020-dashboard1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261020-track1" />
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
@@ -453,6 +453,14 @@
             </div>
 
             <div class="monitor-section">
+              <p class="eyebrow">Vision nozzle tracker</p>
+              <div id="monitorNozzleTrackDetails" class="detail-list">
+                <div><span>Status</span><strong>Reference required</strong></div>
+              </div>
+              <p class="muted">Experimental template tracker. Similarity confidence is informational only and never commands the printer.</p>
+            </div>
+
+            <div class="monitor-section">
               <p class="eyebrow">Calibration</p>
               <div id="monitorCalibrationDetails" class="detail-list"></div>
             </div>
@@ -714,6 +722,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js?v=20261020-dashboard1"></script>
+  <script src="/static/app.js?v=20261020-track1"></script>
 </body>
 </html>

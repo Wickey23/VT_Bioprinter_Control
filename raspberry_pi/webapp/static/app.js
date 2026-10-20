@@ -82,6 +82,14 @@ async function status(){
   $("diskFree").textContent=s.disk.free_gb+" GB";
   $("diskBar").style.width=Math.min(100,s.disk.used_gb/s.disk.total_gb*100)+"%";
 
+  $("dashboardCalibration").textContent=s.research?.calibrated?"VALID":"NOT SET";
+  $("dashboardBaseline").textContent=s.research?.surface_baseline?"Reference surface saved":"No surface baseline";
+  $("dashboardPlan").textContent=s.research?.plan_loaded?"LOADED":"NONE";
+  $("dashboardPlanFile").textContent=s.research?.plan_filename||"No G-code plan";
+  $("dashboardExperiment").textContent=s.research?.experiment_active?"RECORDING":"IDLE";
+  $("dashboardExperimentName").textContent=s.research?.experiment_name||"No active session";
+  $("dashboardMode").textContent=s.research?.mode||"OBSERVE";
+
   const unlocked=!s.printer.commissioning_locked;
   lockBadge($("dashboardLockBadge"),unlocked);
   $("commissioningSummary").textContent=unlocked

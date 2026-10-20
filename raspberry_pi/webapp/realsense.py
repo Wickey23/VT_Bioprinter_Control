@@ -63,6 +63,10 @@ class RealSenseLiveManager:
         self._latest_measurement: dict[str, Any] | None = None
         self._last_frame_at: float | None = None
         self._fps: float = 0.0
+        self._view_mode: str = "RGB"
+        self._color_resolution: str = "640x480"
+        self._depth_resolution: str = "640x480"
+        self._target_fps: int = 15
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -73,10 +77,10 @@ class RealSenseLiveManager:
                 "depth_ready": self._latest_depth_jpeg is not None,
                 "last_frame_at": self._last_frame_at,
                 "fps": round(self._fps, 1),
-                "stream": "RGB + depth",
-                "color_resolution": "640x480",
-                "depth_resolution": "848x480",
-                "target_fps": 15,
+                "stream": f"{self._view_mode} + depth",
+                "color_resolution": self._color_resolution,
+                "depth_resolution": self._depth_resolution,
+                "target_fps": self._target_fps,
             }
 
     def start(self) -> dict[str, Any]:
@@ -144,46 +148,119 @@ class RealSenseLiveManager:
             import numpy as np
             import pyrealsense2 as rs  # type: ignore
 
-            pipeline = rs.pipeline()
-            config = rs.config()
-            config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 15)
-            # D405 provides color from the left global-shutter imager through its ISP.
-            # 640x480 @ 15 FPS keeps browser streaming light on Raspberry Pi 4.
-            config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 15)
+            # The D405 exposes its left imager as a color-capable stream, but
+            # supported combinations can vary with firmware / USB negotiation.
+            # Try conservative matched 640x480 profiles first, then fall back
+            # to a monochrome left-imager stream if color cannot be resolved.
+            candidates = [
+                {
+                    "mode": "RGB",
+                    "depth": (640, 480, rs.format.z16, 15),
+                    "view": ("color", 640, 480, rs.format.rgb8, 15),
+                },
+                {
+                    "mode": "RGB",
+                    "depth": (640, 480, rs.format.z16, 15),
+                    "view": ("color", 640, 480, rs.format.bgr8, 15),
+                },
+                {
+                    "mode": "RGB",
+                    "depth": (848, 480, rs.format.z16, 15),
+                    "view": ("color", 640, 480, rs.format.rgb8, 15),
+                },
+                {
+                    "mode": "MONO",
+                    "depth": (640, 480, rs.format.z16, 15),
+                    "view": ("infrared", 640, 480, rs.format.y8, 15),
+                },
+            ]
 
-            profile = pipeline.start(config)
-            started = True
+            profile = None
+            chosen = None
+            errors: list[str] = []
+
+            for candidate in candidates:
+                if self._stop.is_set():
+                    return
+
+                trial_pipeline = rs.pipeline()
+                config = rs.config()
+                dw, dh, dfmt, dfps = candidate["depth"]
+                kind, vw, vh, vfmt, vfps = candidate["view"]
+
+                config.enable_stream(rs.stream.depth, dw, dh, dfmt, dfps)
+                if kind == "color":
+                    config.enable_stream(rs.stream.color, vw, vh, vfmt, vfps)
+                else:
+                    config.enable_stream(rs.stream.infrared, 1, vw, vh, vfmt, vfps)
+
+                try:
+                    profile = trial_pipeline.start(config)
+                    pipeline = trial_pipeline
+                    started = True
+                    chosen = candidate
+                    break
+                except Exception as exc:
+                    errors.append(f"{candidate['mode']} {dw}x{dh}+{vw}x{vh}: {exc}")
+                    try:
+                        trial_pipeline.stop()
+                    except Exception:
+                        pass
+
+            if not started or pipeline is None or profile is None or chosen is None:
+                raise RuntimeError(
+                    "Unable to start a D405 live view. Tried supported RGB and "
+                    "left-imager profiles. " + " | ".join(errors)
+                )
+
+            dw, dh, _, dfps = chosen["depth"]
+            kind, vw, vh, _, vfps = chosen["view"]
             colorizer = rs.colorizer()
 
             with self._lock:
                 self._running = True
                 self._error = None
+                self._view_mode = chosen["mode"]
+                self._color_resolution = f"{vw}x{vh}"
+                self._depth_resolution = f"{dw}x{dh}"
+                self._target_fps = min(dfps, vfps)
 
             frame_count = 0
             fps_window_start = time.monotonic()
-
-            # Let auto exposure settle before publishing the first frame.
             warmup = 6
+
             while not self._stop.is_set():
                 frames = pipeline.wait_for_frames(3000)
                 depth = frames.get_depth_frame()
-                color = frames.get_color_frame()
-                if not depth or not color:
+
+                if kind == "color":
+                    view = frames.get_color_frame()
+                else:
+                    view = frames.get_infrared_frame(1)
+
+                if not depth or not view:
                     continue
 
                 if warmup:
                     warmup -= 1
                     continue
 
-                color_arr = np.asanyarray(color.get_data())
-                # RealSense bgr8 -> Pillow RGB.
-                color_rgb = color_arr[:, :, ::-1]
-                color_jpeg = _encode_jpeg(color_rgb, quality=82)
+                view_arr = np.asanyarray(view.get_data())
+                if kind == "infrared":
+                    view_rgb = np.stack((view_arr, view_arr, view_arr), axis=-1)
+                else:
+                    fmt = view.profile.format()
+                    if fmt == rs.format.bgr8:
+                        view_rgb = view_arr[:, :, ::-1]
+                    else:
+                        view_rgb = view_arr
+
+                color_jpeg = _encode_jpeg(view_rgb, quality=82)
 
                 depth_color = colorizer.colorize(depth)
                 depth_arr = np.asanyarray(depth_color.get_data())
-                depth_rgb = depth_arr[:, :, ::-1]
-                depth_jpeg = _encode_jpeg(depth_rgb, quality=82)
+                # Colorizer output is RGB8 in current librealsense builds.
+                depth_jpeg = _encode_jpeg(depth_arr, quality=82)
 
                 measurement = _depth_measurement(depth, profile)
                 now = time.time()

@@ -162,3 +162,17 @@ The Printer page now includes guarded 0.1 mm and 1.0 mm X/Y/Z jog tests. Motion 
 Homing remains intentionally unavailable during this commissioning stage. Syringe motion remains locked until the syringe driver mapping and calibration are verified.
 
 The dashboard also provides an `M112` software emergency-stop button. A software stop is not a substitute for cutting printer power in a hardware emergency.
+
+
+## Live D405 camera feed
+
+The Camera page can now run one persistent D405 pipeline for both RGB video and depth sensing.
+
+- RGB browser view: 640x480, target 15 FPS.
+- Depth stream: 848x480, target 15 FPS.
+- The browser requests the latest JPEG frames with the normal controller authentication header.
+- Depth measurements and depth snapshots reuse the same running camera pipeline, avoiding multiple processes fighting over the D405.
+- Leaving the Camera page stops the live feed to reduce Raspberry Pi load.
+- The live feed is for monitoring/commissioning. Closed-loop printer decisions should use validated depth/feature measurements rather than raw RGB pixels alone.
+
+Use **Start live feed** on the Camera page to begin the stream and **Stop live feed** to release the D405 pipeline.

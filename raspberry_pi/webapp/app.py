@@ -27,6 +27,14 @@ from webapp.calibration import (
     solve_bed_calibration,
     transform_camera_point,
 )
+from webapp.experiments import (
+    active_experiment,
+    list_experiments,
+    log_event,
+    save_snapshot,
+    start_experiment,
+    stop_experiment,
+)
 from webapp.print_plan import clear_plan, load_plan, parse_gcode, project_plan
 from webapp.realsense import (
     capture_color_jpeg,
@@ -117,6 +125,10 @@ class SurfaceAnalysisRequest(BaseModel):
 class PlanLoadRequest(BaseModel):
     filename: str = Field(default="print.gcode", min_length=1, max_length=256)
     text: str = Field(min_length=1)
+
+
+class ExperimentStartRequest(BaseModel):
+    name: str = Field(default="Bioprinter experiment", min_length=1, max_length=128)
 
 
 def load_token() -> str:
@@ -674,6 +686,7 @@ def api_camera_pixel(payload: PixelPointRequest) -> dict[str, Any]:
             sample["printer_xyz_mm"] = transform_camera_point(profile, sample["camera_xyz_m"])
         except Exception:
             pass
+    log_event("coordinate_probe", sample)
     return sample
 
 
@@ -757,7 +770,56 @@ def api_calibration_surface(payload: SurfaceAnalysisRequest) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
+    log_event("surface_scan", {key: value for key, value in result.items() if key != "samples"})
     return result
+
+
+@app.get("/api/experiment", dependencies=[Depends(require_token)])
+def api_experiment_status() -> dict[str, Any]:
+    return {
+        "active": active_experiment(),
+        "recent": list_experiments(limit=12),
+    }
+
+
+@app.post("/api/experiment/start", dependencies=[Depends(require_token)])
+def api_experiment_start(payload: ExperimentStartRequest) -> dict[str, Any]:
+    try:
+        metadata = start_experiment(
+            payload.name,
+            calibration=load_profile(),
+            plan=load_plan(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"ok": True, "experiment": metadata}
+
+
+@app.post("/api/experiment/snapshot", dependencies=[Depends(require_token)])
+def api_experiment_snapshot() -> dict[str, Any]:
+    if not active_experiment():
+        raise HTTPException(status_code=409, detail="Start an experiment before recording a snapshot.")
+    try:
+        rgb = capture_color_jpeg()
+        depth = capture_depth_jpeg()
+        measurement = capture_depth_sample()
+        record = save_snapshot(
+            rgb_jpeg=rgb,
+            depth_jpeg=depth,
+            measurement=measurement,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"ok": True, "snapshot": record}
+
+
+@app.post("/api/experiment/stop", dependencies=[Depends(require_token)])
+def api_experiment_stop() -> dict[str, Any]:
+    try:
+        metadata = stop_experiment()
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"ok": True, "experiment": metadata}
 
 
 @app.get("/api/plan", dependencies=[Depends(require_token)])

@@ -105,7 +105,7 @@ def test_quality_engine() -> None:
     }
     surface = {
         "baseline_compatible": True,
-        "deposition": {},
+        "deposition": {"mean_delta_z_mm": 1.0},
         "samples": [
             {
                 "u": 10.0,

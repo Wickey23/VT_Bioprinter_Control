@@ -171,6 +171,7 @@ def save_nozzle_reference(
     pixel_u: float,
     pixel_v: float,
     camera_xyz_m: list[float],
+    template: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     printer_xyz = transform_camera_point(profile, camera_xyz_m)
     profile["nozzle_reference"] = {
@@ -178,6 +179,7 @@ def save_nozzle_reference(
         "camera_xyz_m": [round(float(v), 6) for v in camera_xyz_m],
         "printer_xyz_mm": printer_xyz,
         "captured_at_unix": int(time.time()),
+        "vision_template": template,
     }
     return save_profile(profile)
 

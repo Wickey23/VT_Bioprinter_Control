@@ -33,6 +33,7 @@ from webapp.realsense import (
     capture_depth_sample,
     live_camera_status,
     sample_live_pixel,
+    sample_live_pixels,
     start_live_camera,
     stop_live_camera,
     usb_camera_status,
@@ -54,7 +55,7 @@ HOTSPOT_PASSWORD = "bioprinter"
 HOTSPOT_IP = "10.42.0.1"
 HOTSPOT_URL = f"http://{HOTSPOT_IP}:8080"
 
-app = FastAPI(title="VT Bioprinter Controller", version="0.2.0")
+app = FastAPI(title="VT Bioprinter Controller", version="0.3.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -702,6 +703,7 @@ def api_calibration_solve(payload: CalibrationSolveRequest) -> dict[str, Any]:
             camera_model=camera.get("model"),
             frame_width=payload.frame_width,
             frame_height=payload.frame_height,
+            intrinsics=live_camera_status().get("intrinsics"),
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -742,7 +744,7 @@ def api_calibration_surface(payload: SurfaceAnalysisRequest) -> dict[str, Any]:
     try:
         result = analyze_surface(
             profile,
-            sample_live_pixel,
+            sample_live_pixels,
             columns=payload.columns,
             rows=payload.rows,
         )

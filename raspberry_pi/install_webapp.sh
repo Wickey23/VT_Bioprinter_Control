@@ -96,6 +96,7 @@ WorkingDirectory=$SCRIPT_DIR
 Environment=PYTHONUNBUFFERED=1
 Environment=VT_BIOPRINTER_CONFIG_DIR=$CONFIG_DIR
 Environment=VT_BIOPRINTER_NETWORK_HELPER=$NETWORK_HELPER_TARGET
+Environment=LD_LIBRARY_PATH=/usr/local/lib
 ExecStart=$SCRIPT_DIR/.venv/bin/uvicorn webapp.app:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=3
@@ -140,4 +141,9 @@ echo
 echo "If no normal Wi-Fi is active after boot, the Pi will"
 echo "automatically start the setup hotspot after about 25 seconds."
 echo "The Network page can also turn hotspot mode on or off manually."
+echo
+echo "REALSENSE D405"
+echo "  Camera USB detection works immediately."
+echo "  For depth frames/sensing, run:"
+echo "    bash $SCRIPT_DIR/install_realsense.sh"
 echo "===================================================="

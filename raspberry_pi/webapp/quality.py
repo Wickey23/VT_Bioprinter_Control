@@ -130,8 +130,29 @@ def analyze_final_surface_quality(
         within_count / expected_count * 100.0 if expected_count else None
     )
 
+    advisory_reasons: list[str] = []
+    if expected_count == 0:
+        advisory_status = "INSUFFICIENT_DATA"
+        advisory_reasons.append("No sampled points intersected the expected G-code path.")
+    elif missing_count > 0 or excess_count > 0:
+        advisory_status = "FAULT"
+        if missing_count > 0:
+            advisory_reasons.append(f"{missing_count} expected-path samples had no detected deposition.")
+        if excess_count > 0:
+            advisory_reasons.append(f"{excess_count} off-path samples showed deposition above threshold.")
+    elif within_count < expected_count:
+        advisory_status = "WARNING"
+        advisory_reasons.append(
+            f"{expected_count - within_count} expected-path samples exceeded the user-selected height tolerance."
+        )
+    else:
+        advisory_status = "NORMAL"
+        advisory_reasons.append("All sampled expected-path points were within the selected tolerance.")
+
     return {
         "mode": "FINAL_SURFACE_OBSERVE",
+        "advisory_status": advisory_status,
+        "advisory_reasons": advisory_reasons,
         "settings": {
             "path_radius_mm": float(path_radius_mm),
             "min_deposition_height_mm": float(min_deposition_height_mm),
@@ -161,6 +182,7 @@ def analyze_final_surface_quality(
         "note": (
             "Observe-only coarse final-surface comparison. G-code Z is used as an "
             "expected height proxy and must be validated for the specific bioink, "
-            "layer model, camera geometry, and nozzle process before decisions are automated."
+            "layer model, camera geometry, and nozzle process before decisions are automated. "
+            "The advisory status is informational only and never commands the printer."
         ),
     }

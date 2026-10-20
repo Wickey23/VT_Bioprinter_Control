@@ -514,6 +514,9 @@ def status() -> dict[str, Any]:
         pass
 
     printer = chosen_printer()
+    calibration_profile = load_profile()
+    active_plan = load_plan()
+    experiment = active_experiment()
     return {
         "hostname": socket.gethostname(),
         "uptime_seconds": uptime_seconds,
@@ -531,6 +534,15 @@ def status() -> dict[str, Any]:
             "commissioning_locked": not read_commissioning()["unlocked"],
         },
         "camera": usb_camera_status(),
+        "research": {
+            "mode": "OBSERVE",
+            "calibrated": calibration_profile is not None,
+            "surface_baseline": bool(calibration_profile and calibration_profile.get("surface_baseline")),
+            "plan_loaded": active_plan is not None,
+            "plan_filename": active_plan.get("filename") if active_plan else None,
+            "experiment_active": experiment is not None,
+            "experiment_name": experiment.get("name") if experiment else None,
+        },
     }
 
 

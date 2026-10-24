@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import re
@@ -44,6 +46,7 @@ from webapp.print_plan import (
     printer_to_camera,
     project_camera_point,
     project_plan,
+    slice_stl_to_syringe_gcode,
 )
 from webapp.quality import analyze_final_surface_quality
 from webapp.realsense import (
@@ -146,6 +149,17 @@ class SurfaceAnalysisRequest(BaseModel):
 class PlanLoadRequest(BaseModel):
     filename: str = Field(default="print.gcode", min_length=1, max_length=256)
     text: str = Field(min_length=1)
+
+
+class SlicerRequest(BaseModel):
+    filename: str = Field(default="model.stl", min_length=1, max_length=256)
+    stl_base64: str = Field(min_length=4, max_length=20_000_000)
+    layer_height_mm: float = Field(default=0.5, ge=0.05, le=5.0)
+    bead_width_mm: float = Field(default=0.8, ge=0.05, le=10.0)
+    infill_percent: float = Field(default=20.0, ge=0.0, le=100.0)
+    syringe_diameter_mm: float = Field(default=14.5, ge=1.0, le=50.0)
+    print_feed_mm_min: int = Field(default=300, ge=30, le=3000)
+    travel_feed_mm_min: int = Field(default=1200, ge=60, le=6000)
 
 
 class ExperimentStartRequest(BaseModel):
@@ -1218,6 +1232,31 @@ def api_plan_load(payload: PlanLoadRequest) -> dict[str, Any]:
 def api_plan_clear() -> dict[str, Any]:
     clear_plan()
     return {"ok": True}
+
+
+@app.post("/api/slicer/stl", dependencies=[Depends(require_token)])
+def api_slice_stl(payload: SlicerRequest) -> dict[str, Any]:
+    try:
+        stl_data = base64.b64decode(payload.stl_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid STL upload encoding.") from exc
+
+    if len(stl_data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="STL is larger than the 12 MB Raspberry Pi slicer limit.")
+
+    try:
+        return slice_stl_to_syringe_gcode(
+            stl_data,
+            filename=payload.filename,
+            layer_height_mm=payload.layer_height_mm,
+            bead_width_mm=payload.bead_width_mm,
+            infill_percent=payload.infill_percent,
+            syringe_diameter_mm=payload.syringe_diameter_mm,
+            print_feed_mm_min=payload.print_feed_mm_min,
+            travel_feed_mm_min=payload.travel_feed_mm_min,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/plan/projected", dependencies=[Depends(require_token)])

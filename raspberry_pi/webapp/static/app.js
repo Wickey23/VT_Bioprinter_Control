@@ -1062,10 +1062,12 @@ function drawSlicerPreview(plan){
     return;
   }
 
-  const min=plan.bounds_mm?.min||[0,0,0];
-  const max=plan.bounds_mm?.max||[220,220,0];
-  const dx=Math.max(1e-6,Number(max[0])-Number(min[0]));
-  const dy=Math.max(1e-6,Number(max[1])-Number(min[1]));
+  const xs=segments.flatMap(s=>[Number(s.start[0]),Number(s.end[0])]);
+  const ys=segments.flatMap(s=>[Number(s.start[1]),Number(s.end[1])]);
+  const min=[Math.min(...xs),Math.min(...ys),0];
+  const max=[Math.max(...xs),Math.max(...ys),0];
+  const dx=Math.max(1e-6,max[0]-min[0]);
+  const dy=Math.max(1e-6,max[1]-min[1]);
   const pad=28;
   const scale=Math.min((width-pad*2)/dx,(height-pad*2)/dy);
   const ox=(width-dx*scale)/2-Number(min[0])*scale;

@@ -70,6 +70,7 @@ CONFIG_DIR = Path(os.environ.get("VT_BIOPRINTER_CONFIG_DIR", Path.home() / ".con
 TOKEN_FILE = CONFIG_DIR / "token"
 COMMISSION_FILE = CONFIG_DIR / "commissioning.json"
 NETWORK_HELPER = Path(os.environ.get("VT_BIOPRINTER_NETWORK_HELPER", "/usr/local/sbin/vt-bioprinter-network"))
+REMOTE_URL_FILE = Path(os.environ.get("VT_BIOPRINTER_REMOTE_URL_FILE", "/etc/vt-bioprinter/remote-url"))
 
 BAUD = 115200
 SAFE_COMMANDS = {"M105", "M114", "M115", "M119", "M503"}
@@ -742,6 +743,29 @@ def status() -> dict[str, Any]:
 @app.get("/api/network/status", dependencies=[Depends(require_token)])
 def api_network_status() -> dict[str, Any]:
     return network_status()
+
+
+@app.get("/api/network/remote", dependencies=[Depends(require_token)])
+def api_remote_access_status() -> dict[str, Any]:
+    proc = run_command(["systemctl", "is-active", "cloudflared.service"], timeout=5)
+    active = proc.returncode == 0 and proc.stdout.strip() == "active"
+    public_url = None
+    try:
+        value = REMOTE_URL_FILE.read_text(encoding="utf-8").strip()
+        if value:
+            public_url = value
+    except OSError:
+        pass
+    return {
+        "configured": public_url is not None,
+        "active": active,
+        "public_url": public_url,
+        "service": "cloudflared.service",
+        "note": (
+            "Remote access uses an outbound Cloudflare Tunnel to this controller; "
+            "port 8080 should remain closed to the public Internet."
+        ),
+    }
 
 
 @app.get("/api/network/scan", dependencies=[Depends(require_token)])

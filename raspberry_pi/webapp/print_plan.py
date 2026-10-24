@@ -61,6 +61,9 @@ def _tokens(line: str) -> dict[str, float]:
 def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
     absolute_xyz = True
     absolute_e = True
+    has_explicit_layers = any(
+        line.strip().upper().startswith(";LAYER:") for line in text.splitlines()
+    )
 
     x = y = z = e = 0.0
     feed = 0.0
@@ -151,7 +154,7 @@ def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
         if "F" in params:
             feed = params["F"]
 
-        if abs(z - last_z) > 1e-6 and not upper.startswith(";LAYER:"):
+        if not has_explicit_layers and abs(z - last_z) > 1e-6:
             if z > last_z + 1e-5:
                 layer += 1
             last_z = z
@@ -209,6 +212,7 @@ def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
             "max": [round(float(v), 4) for v in maxs],
         },
         "segments": segments,
+        "source_gcode": text,
     }
     return save_plan(plan)
 
@@ -395,8 +399,34 @@ def _point_in_closed_path(point: np.ndarray, path: list[np.ndarray]) -> bool:
     return inside
 
 
-def _point_in_paths(point: np.ndarray, paths: list[list[np.ndarray]]) -> bool:
-    # Even/odd fill rule supports nested loops and holes reasonably well.
+def _distance_point_to_segment(point: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
+    vector = b - a
+    length_sq = float(np.dot(vector, vector))
+    if length_sq <= 1e-12:
+        return float(np.linalg.norm(point - a))
+    t = float(np.dot(point - a, vector) / length_sq)
+    t = max(0.0, min(1.0, t))
+    closest = a + t * vector
+    return float(np.linalg.norm(point - closest))
+
+
+def _point_in_paths(
+    point: np.ndarray,
+    paths: list[list[np.ndarray]],
+    *,
+    boundary_tolerance_mm: float = 0.65,
+) -> bool:
+    # A contour deposited directly above the previous contour is supported even
+    # though a mathematical point-in-polygon test may classify a boundary point
+    # as outside. Treat points close to the previous layer's path as supported,
+    # then use even/odd fill for interior support.
+    for path in paths:
+        if len(path) < 2:
+            continue
+        closed = path if float(np.linalg.norm(path[-1] - path[0])) <= 0.1 else path + [path[0]]
+        for a, b in zip(closed[:-1], closed[1:]):
+            if _distance_point_to_segment(point, a, b) <= boundary_tolerance_mm:
+                return True
     return sum(1 for path in paths if _point_in_closed_path(point, path)) % 2 == 1
 
 

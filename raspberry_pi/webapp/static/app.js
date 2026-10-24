@@ -26,6 +26,18 @@ const state={
   qualityObjectUrl:null,
   slicedGcode:null,
   slicedFilename:null,
+  slicerMeshTriangles:null,
+  preview3d:{
+    yaw:-0.72,
+    pitch:0.88,
+    zoom:1,
+    panX:0,
+    panY:0,
+    dragging:false,
+    dragMode:"orbit",
+    lastX:0,
+    lastY:0
+  },
   slicerPreflightReady:false,
   printState:null,
   printCameraActive:false,
@@ -1042,6 +1054,247 @@ async function analyzeMonitorSurface(){
 
 
 
+function parseStlTrianglesClient(buffer){
+  const bytes=new Uint8Array(buffer);
+  if(bytes.byteLength<15)return [];
+  const view=new DataView(buffer);
+  if(bytes.byteLength>=84){
+    const count=view.getUint32(80,true);
+    const expected=84+count*50;
+    if(count>0&&expected===bytes.byteLength){
+      const triangles=[];
+      let offset=84;
+      const limit=Math.min(count,20000);
+      for(let i=0;i<limit;i++){
+        offset+=12;
+        const tri=[];
+        for(let v=0;v<3;v++){
+          tri.push([
+            view.getFloat32(offset,true),
+            view.getFloat32(offset+4,true),
+            view.getFloat32(offset+8,true)
+          ]);
+          offset+=12;
+        }
+        offset+=2;
+        triangles.push(tri);
+      }
+      return triangles;
+    }
+  }
+
+  let text="";
+  try{text=new TextDecoder("utf-8",{fatal:true}).decode(bytes)}
+  catch(_){return []}
+  const vertices=[];
+  for(const line of text.split(/\r?\n/)){
+    const m=line.trim().match(/^vertex\s+([-+\deE.]+)\s+([-+\deE.]+)\s+([-+\deE.]+)/i);
+    if(m)vertices.push([Number(m[1]),Number(m[2]),Number(m[3])]);
+    if(vertices.length>=60000)break;
+  }
+  const triangles=[];
+  for(let i=0;i+2<vertices.length;i+=3)triangles.push([vertices[i],vertices[i+1],vertices[i+2]]);
+  return triangles;
+}
+
+function centerMeshOnBed(triangles){
+  if(!triangles?.length)return [];
+  const pts=triangles.flat();
+  const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),zs=pts.map(p=>p[2]);
+  const minX=Math.min(...xs),maxX=Math.max(...xs);
+  const minY=Math.min(...ys),maxY=Math.max(...ys);
+  const minZ=Math.min(...zs);
+  const ox=110-(minX+maxX)/2;
+  const oy=110-(minY+maxY)/2;
+  const oz=-minZ;
+  return triangles.map(tri=>tri.map(p=>[p[0]+ox,p[1]+oy,p[2]+oz]));
+}
+
+function project3dPoint(point,canvas){
+  const view=state.preview3d;
+  const x=Number(point[0])-110;
+  const y=Number(point[1])-110;
+  const z=Number(point[2]);
+
+  const cy=Math.cos(view.yaw),sy=Math.sin(view.yaw);
+  const cp=Math.cos(view.pitch),sp=Math.sin(view.pitch);
+  const rx=cy*x-sy*y;
+  const ry=sy*x+cy*y;
+  const rz=z;
+  const py=cp*ry-sp*rz;
+  const pz=sp*ry+cp*rz;
+
+  const base=Math.min(canvas.width,canvas.height)/290;
+  const scale=base*view.zoom;
+  return {
+    x:canvas.width/2+view.panX+rx*scale,
+    y:canvas.height/2+view.panY-py*scale,
+    depth:pz
+  };
+}
+
+function draw3dLine(ctx,canvas,a,b,stroke,width=1,alpha=1){
+  const p0=project3dPoint(a,canvas),p1=project3dPoint(b,canvas);
+  ctx.save();
+  ctx.strokeStyle=stroke;
+  ctx.globalAlpha=alpha;
+  ctx.lineWidth=width;
+  ctx.beginPath();
+  ctx.moveTo(p0.x,p0.y);
+  ctx.lineTo(p1.x,p1.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSlicerPreview3d(plan){
+  const canvas=$("slicerPreview3d");
+  if(!canvas)return;
+  const ctx=canvas.getContext("2d");
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#0b1220";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Bambu-style build plate grid.
+  for(let v=0;v<=220;v+=20){
+    const major=v%100===0;
+    draw3dLine(ctx,canvas,[v,0,0],[v,220,0],major?"#526173":"#263446",major?1.5:1,major?.85:.62);
+    draw3dLine(ctx,canvas,[0,v,0],[220,v,0],major?"#526173":"#263446",major?1.5:1,major?.85:.62);
+  }
+  const outline=[[0,0,0],[220,0,0],[220,220,0],[0,220,0],[0,0,0]];
+  for(let i=0;i<outline.length-1;i++)draw3dLine(ctx,canvas,outline[i],outline[i+1],"#718096",2,1);
+
+  const mesh=state.slicerMeshTriangles||[];
+  if($("previewShowModel")?.checked&&mesh.length){
+    const faces=mesh.map(tri=>{
+      const projected=tri.map(p=>project3dPoint(p,canvas));
+      return {tri,projected,depth:(projected[0].depth+projected[1].depth+projected[2].depth)/3};
+    }).sort((a,b)=>a.depth-b.depth);
+    const stride=Math.max(1,Math.ceil(faces.length/12000));
+    for(let i=0;i<faces.length;i+=stride){
+      const face=faces[i],p=face.projected;
+      ctx.beginPath();
+      ctx.moveTo(p[0].x,p[0].y);
+      ctx.lineTo(p[1].x,p[1].y);
+      ctx.lineTo(p[2].x,p[2].y);
+      ctx.closePath();
+      ctx.fillStyle="rgba(101,163,255,.16)";
+      ctx.fill();
+      ctx.strokeStyle="rgba(148,193,255,.28)";
+      ctx.lineWidth=.7;
+      ctx.stroke();
+    }
+  }
+
+  if($("previewShowToolpath")?.checked&&plan?.segments?.length){
+    const extruding=plan.segments.filter(s=>s.extruding);
+    const layers=[...new Set(extruding.map(s=>Number(s.layer)||0))].sort((a,b)=>a-b);
+    const showAll=$("slicerShowAllLayers")?.checked!==false;
+    const selected=Number($("slicerLayerPreview")?.value||0);
+    const segs=showAll?extruding:extruding.filter(s=>(Number(s.layer)||0)===selected);
+    const stride=Math.max(1,Math.ceil(segs.length/8000));
+    const maxLayer=layers.length?layers[layers.length-1]:1;
+    for(let i=0;i<segs.length;i+=stride){
+      const s=segs[i];
+      const t=maxLayer?Number(s.layer||0)/maxLayer:0;
+      const hue=190+Math.round(90*t);
+      draw3dLine(ctx,canvas,s.start,s.end,"hsl("+hue+" 90% 62%)",1.8,showAll?.72:1);
+    }
+  }
+
+  // Z axis and build-volume cue.
+  const maxModelZ=Math.max(
+    30,
+    ...(state.slicerMeshTriangles?.flat().map(p=>Number(p[2])||0)||[]),
+    ...((plan?.segments||[]).map(s=>Number(s.end?.[2])||0))
+  );
+  draw3dLine(ctx,canvas,[0,0,0],[0,0,Math.min(250,maxModelZ+20)],"#a3e635",1.4,.9);
+
+  ctx.fillStyle="#cbd5e1";
+  ctx.font="13px system-ui";
+  ctx.fillText("220 × 220 mm build plate",18,24);
+  if(!mesh.length&&!plan?.segments?.length){
+    ctx.fillStyle="#94a3b8";
+    ctx.font="16px system-ui";
+    ctx.fillText("Upload and slice an STL to see the 3D model and toolpath.",24,52);
+  }
+}
+
+function reset3dView(){
+  state.preview3d.yaw=-0.72;
+  state.preview3d.pitch=0.88;
+  state.preview3d.zoom=1;
+  state.preview3d.panX=0;
+  state.preview3d.panY=20;
+  drawSlicerPreview3d(state.planSummary);
+}
+
+function fit3dView(){
+  const canvas=$("slicerPreview3d");
+  const points=[];
+  for(const tri of state.slicerMeshTriangles||[])points.push(...tri);
+  for(const s of state.planSummary?.segments||[]){
+    if(s.extruding){points.push(s.start,s.end)}
+  }
+  if(!points.length){
+    reset3dView();
+    return;
+  }
+  const xs=points.map(p=>Number(p[0])-110),ys=points.map(p=>Number(p[1])-110);
+  const span=Math.max(20,Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys));
+  state.preview3d.zoom=Math.max(.65,Math.min(4,180/span));
+  state.preview3d.panX=0;
+  state.preview3d.panY=20;
+  drawSlicerPreview3d(state.planSummary);
+}
+
+function setPreviewMode(mode){
+  const is3d=mode==="3d";
+  $("preview3dPanel").hidden=!is3d;
+  $("preview2dPanel").hidden=is3d;
+  $("preview3dMode").classList.toggle("active",is3d);
+  $("preview2dMode").classList.toggle("active",!is3d);
+  if(is3d)drawSlicerPreview3d(state.planSummary);
+  else drawSlicerPreview(state.planSummary);
+}
+
+function initSlicer3dInteractions(){
+  const canvas=$("slicerPreview3d");
+  if(!canvas||canvas.dataset.bound==="1")return;
+  canvas.dataset.bound="1";
+
+  canvas.addEventListener("pointerdown",event=>{
+    canvas.setPointerCapture(event.pointerId);
+    state.preview3d.dragging=true;
+    state.preview3d.dragMode=event.shiftKey?"pan":"orbit";
+    state.preview3d.lastX=event.clientX;
+    state.preview3d.lastY=event.clientY;
+  });
+  canvas.addEventListener("pointermove",event=>{
+    if(!state.preview3d.dragging)return;
+    const dx=event.clientX-state.preview3d.lastX;
+    const dy=event.clientY-state.preview3d.lastY;
+    state.preview3d.lastX=event.clientX;
+    state.preview3d.lastY=event.clientY;
+    if(state.preview3d.dragMode==="pan"){
+      state.preview3d.panX+=dx;
+      state.preview3d.panY+=dy;
+    }else{
+      state.preview3d.yaw+=dx*.008;
+      state.preview3d.pitch=Math.max(.12,Math.min(1.48,state.preview3d.pitch-dy*.008));
+    }
+    drawSlicerPreview3d(state.planSummary);
+  });
+  const stop=()=>{state.preview3d.dragging=false};
+  canvas.addEventListener("pointerup",stop);
+  canvas.addEventListener("pointercancel",stop);
+  canvas.addEventListener("wheel",event=>{
+    event.preventDefault();
+    const factor=Math.exp(-event.deltaY*.0012);
+    state.preview3d.zoom=Math.max(.35,Math.min(8,state.preview3d.zoom*factor));
+    drawSlicerPreview3d(state.planSummary);
+  },{passive:false});
+}
+
 function drawSlicerPreview(plan){
   const canvas=$("slicerPreview");
   if(!canvas)return;
@@ -1215,6 +1468,8 @@ async function sliceStlForSyringe(){
 
   try{
     const buffer=await file.arrayBuffer();
+    state.slicerMeshTriangles=centerMeshOnBed(parseStlTrianglesClient(buffer));
+    drawSlicerPreview3d(state.planSummary);
     const d=await api("/api/slicer/stl",{
       method:"POST",
       body:JSON.stringify({
@@ -1251,6 +1506,7 @@ async function sliceStlForSyringe(){
     }
     renderPlan(d.plan);
     drawSlicerPreview(d.plan);
+    drawSlicerPreview3d(d.plan);
     if(state.calibrationProfile)await loadProjectedPlan().catch(()=>{});
 
     const s=d.summary||{};
@@ -1539,6 +1795,7 @@ function renderPlan(plan){
     updatePrintStartReadiness();
   }
   drawSlicerPreview(plan);
+  drawSlicerPreview3d(plan);
   updateAnalyticsReadiness();
 }
 
@@ -2025,6 +2282,12 @@ $("monitorCanvas").onclick=e=>monitorCanvasClick(e);
 $("loadGcode").onclick=()=>loadGcodeFile();
 $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
 $("sliceStl").onclick=()=>sliceStlForSyringe();
+$("preview3dMode").onclick=()=>setPreviewMode("3d");
+$("preview2dMode").onclick=()=>setPreviewMode("2d");
+$("previewFit").onclick=()=>fit3dView();
+$("previewReset").onclick=()=>reset3dView();
+$("previewShowModel").onchange=()=>drawSlicerPreview3d(state.planSummary);
+$("previewShowToolpath").onchange=()=>drawSlicerPreview3d(state.planSummary);
 $("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
 $("confirmPhysicalStop").onchange=()=>updatePrintStartReadiness();
 $("confirmXClearance").onchange=()=>updatePrintStartReadiness();
@@ -2034,8 +2297,8 @@ $("startPhysicalPrint").onclick=()=>startPhysicalPrint();
 $("pausePhysicalPrint").onclick=()=>pausePhysicalPrint();
 $("resumePhysicalPrint").onclick=()=>resumePhysicalPrint();
 $("stopPhysicalPrint").onclick=()=>stopPhysicalPrint();
-$("slicerLayerPreview").oninput=()=>drawSlicerPreview(state.planSummary);
-$("slicerShowAllLayers").onchange=()=>drawSlicerPreview(state.planSummary);
+$("slicerLayerPreview").oninput=()=>drawSlicerPreview(state.planSummary);drawSlicerPreview3d(state.planSummary);
+$("slicerShowAllLayers").onchange=()=>drawSlicerPreview(state.planSummary);drawSlicerPreview3d(state.planSummary);
 $("slicerTemperatureMode").onchange=()=>{
   const heated=$("slicerTemperatureMode").value==="heated_bed";
   $("slicerBedTemperature").disabled=!heated;
@@ -2118,6 +2381,8 @@ $("loginForm").onsubmit=async e=>{
   }
   calculateSyringeMotion();
   drawSlicerPreview(state.planSummary);
+  initSlicer3dInteractions();
+  reset3dView();
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);
   setInterval(()=>{if(state.token)loadPrintRunner().catch(()=>{})},1500);
 })();

@@ -1214,6 +1214,47 @@ async function stopExperimentSession(){
 }
 
 
+function calculateSyringeMotion(){
+  const diameter=Number($("syringeDiameter").value);
+  const gear=Number($("syringeGearRatio").value);
+  const pitch=Number($("syringeLeadPitch").value);
+  const motorSteps=Number($("syringeMotorSteps").value);
+  const microsteps=Number($("syringeMicrosteps").value);
+  const volumeMl=Number($("syringeVolume").value);
+  const pathLength=Number($("syringePathLength").value);
+
+  const values=[diameter,gear,pitch,motorSteps,microsteps,volumeMl];
+  if(values.some(v=>!Number.isFinite(v))||diameter<=0||gear<=0||pitch<=0||motorSteps<=0||microsteps<=0||volumeMl<0){
+    $("syringeMotionResults").innerHTML='<div><span>Status</span><strong>Enter valid positive mechanics values and a non-negative volume.</strong></div>';
+    return;
+  }
+
+  const radius=diameter/2;
+  const area=Math.PI*radius*radius;
+  const volumeMm3=volumeMl*1000;
+  const plungerMm=volumeMm3/area;
+  const motorRevs=plungerMm*gear/pitch;
+  const theoreticalEstepsPerMm=motorSteps*microsteps*gear/pitch;
+  const totalMicrosteps=plungerMm*theoreticalEstepsPerMm;
+  const mlPerPlungerMm=area/1000;
+  const ePerPathMm=pathLength>0?plungerMm/pathLength:null;
+  const ulPerPathMm=pathLength>0?(volumeMl*1000)/pathLength:null;
+
+  const rows=[
+    ["Syringe cross-section",area.toFixed(2)+" mm²"],
+    ["Volume per 1 mm plunger",mlPerPlungerMm.toFixed(4)+" mL"],
+    ["Theoretical E-steps/mm",theoreticalEstepsPerMm.toFixed(1)+" microsteps/mm"],
+    ["Requested plunger travel / E Δ",plungerMm.toFixed(4)+" mm"],
+    ["Motor rotation",motorRevs.toFixed(4)+" rev"],
+    ["Total motor microsteps",Math.round(totalMicrosteps).toLocaleString()],
+  ];
+  if(ePerPathMm!==null){
+    rows.push(["E per path mm",ePerPathMm.toFixed(6)+" mm E/mm XY"]);
+    rows.push(["Volume per path mm",ulPerPathMm.toFixed(3)+" µL/mm"]);
+  }
+  $("syringeMotionResults").innerHTML=rows.map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+}
+
 function updateAnalyticsReadiness(){
   const calibrated=!!state.calibrationProfile;
   const baseline=!!state.calibrationProfile?.surface_baseline;
@@ -1462,6 +1503,7 @@ $("monitorCanvas").onclick=e=>monitorCanvasClick(e);
 
 $("loadGcode").onclick=()=>loadGcodeFile();
 $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
+$("calculateSyringeMotion").onclick=()=>calculateSyringeMotion();
 
 $("startExperiment").onclick=()=>startExperimentSession();
 $("captureExperimentSnapshot").onclick=()=>captureExperimentSnapshot();
@@ -1535,6 +1577,7 @@ $("loginForm").onsubmit=async e=>{
       await Promise.allSettled([status(),printer(),camera(),loadCommissioning(),loadCalibration(),loadPlan(),loadExperiments()]);
     }catch{}
   }
+  calculateSyringeMotion();
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);
 })();
 

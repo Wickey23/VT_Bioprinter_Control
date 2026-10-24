@@ -46,6 +46,11 @@ class PrintRunner:
             "completed_commands": 0,
             "total_commands": 0,
             "progress_percent": 0.0,
+            "planned_duration_seconds": None,
+            "elapsed_seconds": 0.0,
+            "estimated_total_seconds": None,
+            "estimated_remaining_seconds": None,
+            "estimated_finish_at_unix": None,
             "last_response": [],
             "error": None,
             "stop_requested": False,
@@ -63,7 +68,42 @@ class PrintRunner:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return copy.deepcopy(self._state)
+            state = copy.deepcopy(self._state)
+
+        started = state.get("started_at_unix")
+        finished = state.get("finished_at_unix")
+        if started:
+            end_time = finished or int(time.time())
+            elapsed = max(0.0, float(end_time) - float(started))
+            state["elapsed_seconds"] = round(elapsed, 1)
+
+            progress = max(0.0, min(100.0, float(state.get("progress_percent") or 0.0)))
+            planned = state.get("planned_duration_seconds")
+            estimated_total = float(planned) if isinstance(planned, (int, float)) and planned > 0 else None
+
+            # Once enough of the job has actually run, prefer observed throughput
+            # over the slicer's geometric estimate. This naturally incorporates
+            # serial latency, homing, M400 waits, and D405 layer checks.
+            if state.get("running") and progress >= 2.0:
+                observed_total = elapsed / max(progress / 100.0, 1e-6)
+                if estimated_total is None:
+                    estimated_total = observed_total
+                else:
+                    estimated_total = 0.35 * estimated_total + 0.65 * observed_total
+
+            if state.get("state") == "COMPLETE":
+                estimated_total = elapsed
+
+            if estimated_total is not None:
+                remaining = 0.0 if state.get("state") == "COMPLETE" else max(
+                    0.0, estimated_total * (1.0 - progress / 100.0)
+                )
+                state["estimated_total_seconds"] = round(estimated_total, 1)
+                state["estimated_remaining_seconds"] = round(remaining, 1)
+                state["estimated_finish_at_unix"] = (
+                    int(time.time() + remaining) if state.get("running") else None
+                )
+        return state
 
     def start(
         self,
@@ -74,6 +114,7 @@ class PrintRunner:
         baud: int,
         serial_lock: threading.Lock,
         monitor_callback: Callable[[int], dict[str, Any]] | None = None,
+        planned_duration_seconds: float | None = None,
     ) -> dict[str, Any]:
         commands = self._count_commands(gcode)
         if commands <= 0:
@@ -92,6 +133,12 @@ class PrintRunner:
                     "filename": filename,
                     "started_at_unix": int(time.time()),
                     "total_commands": commands,
+                    "planned_duration_seconds": (
+                        float(planned_duration_seconds)
+                        if isinstance(planned_duration_seconds, (int, float))
+                        and planned_duration_seconds > 0
+                        else None
+                    ),
                     "monitoring": {
                         **self._state["monitoring"],
                         "enabled": monitor_callback is not None,

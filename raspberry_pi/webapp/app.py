@@ -1617,6 +1617,7 @@ def api_print_dry_run(payload: DryRunStartRequest) -> dict[str, Any]:
             baud=BAUD,
             serial_lock=SERIAL_LOCK,
             monitor_callback=None,
+            planned_duration_seconds=plan.get("estimated_time_seconds"),
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1703,6 +1704,7 @@ def api_print_start(payload: PrintStartRequest) -> dict[str, Any]:
             baud=BAUD,
             serial_lock=SERIAL_LOCK,
             monitor_callback=monitor_callback,
+            planned_duration_seconds=plan.get("estimated_time_seconds"),
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

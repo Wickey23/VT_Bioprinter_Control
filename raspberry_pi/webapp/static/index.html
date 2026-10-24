@@ -618,9 +618,11 @@
           <p>Streams the active VT-sliced G-code to Marlin one command at a time. Physical execution remains blocked until the slicer preflight passes.</p>
           <div class="checklist">
             <label><input id="confirmPhysicalStop" type="checkbox"> Physical power cutoff is immediately reachable</label>
+            <label><input id="confirmXClearance" type="checkbox"> Enderstruder and relocated X-endstop clearance are physically verified for homing</label>
+            <label><input id="confirmSurfaceClean" type="checkbox"> Print surface is clean and ready for a fresh D405 baseline</label>
           </div>
           <div class="locked-controls">
-            <button id="startPhysicalPrint" class="primary" disabled>Start Print</button>
+            <button id="startPhysicalPrint" class="primary" disabled>Calibrate & Start Print</button>
             <button id="pausePhysicalPrint" class="secondary" disabled>Pause</button>
             <button id="resumePhysicalPrint" class="secondary" disabled>Resume</button>
             <button id="stopPhysicalPrint" class="danger-outline" disabled>Stop sending</button>
@@ -631,6 +633,7 @@
             <div><span>Commands</span><strong id="printCommands">0 / 0</strong></div>
             <div><span>D405 monitor</span><strong id="printVisionStatus">NOT STARTED</strong></div>
           </div>
+          <div id="preprintCalibrationDetails" class="detail-list"></div>
           <div id="printVisionDetails" class="detail-list"></div>
           <div class="camera-stage" id="printCameraStage">
             <img id="printCameraImage" alt="D405 live print view">

@@ -72,6 +72,14 @@ BAUD = 115200
 SAFE_COMMANDS = {"M105", "M114", "M115", "M119", "M503"}
 SERIAL_LOCK = threading.Lock()
 
+# Conservative Ender-3 V2 motion envelope. Large jogs are only enabled after
+# this controller has completed a successful home sequence in the current
+# service session, so M114 coordinates have a known reference.
+AXIS_LIMITS_MM = {"X": (0.0, 220.0), "Y": (0.0, 220.0), "Z": (0.0, 250.0)}
+LARGE_JOG_STEPS_MM = {5.0, 10.0, 25.0}
+COMMISSIONING_JOG_STEPS_MM = {0.1, 1.0}
+MOTION_REFERENCE = {"homed": False, "centered": False}
+
 HOTSPOT_NAME = "VT-Bioprinter-Setup"
 HOTSPOT_PASSWORD = "bioprinter"
 HOTSPOT_IP = "10.42.0.1"
@@ -421,35 +429,49 @@ def save_commissioning(payload: CommissioningRequest) -> dict[str, Any]:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     data = payload.model_dump()
     data["unlocked"] = all(data.values())
+    if not data["unlocked"]:
+        MOTION_REFERENCE["homed"] = False
+        MOTION_REFERENCE["centered"] = False
     COMMISSION_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return data
 
 
-def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, Any]:
+def _read_until_ok(port: serial.Serial, command: str, timeout_s: float = 5.0) -> list[str]:
+    port.write((command + "\n").encode("ascii"))
+    port.flush()
+    lines: list[str] = []
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        raw = port.readline()
+        if not raw:
+            continue
+        line = raw.decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        lines.append(line)
+        if line == "ok" or line.startswith("Error:"):
+            return lines
+    raise HTTPException(status_code=504, detail=f"Timed out waiting for Marlin response to {command}.")
+
+
+def _parse_endstops(lines: list[str]) -> dict[str, str]:
+    states: dict[str, str] = {}
+    for line in lines:
+        match = re.match(r"^(x_min|y_min|z_min):\\s*(open|TRIGGERED)$", line, re.IGNORECASE)
+        if match:
+            states[match.group(1).lower()] = match.group(2).upper()
+    return states
+
+
+def home_and_center() -> dict[str, Any]:
     state = read_commissioning()
     if not state["unlocked"]:
         raise HTTPException(status_code=423, detail="Motion is locked until the commissioning checklist is complete.")
-
-    if abs(distance_mm) not in (0.1, 1.0):
-        raise HTTPException(status_code=400, detail="Commissioning jogs are limited to 0.1 mm or 1.0 mm.")
 
     target = chosen_printer()
     if not target:
         raise HTTPException(status_code=409, detail="No high-confidence Creality/CH340 serial interface is connected.")
 
-    # M400 is critical here: Marlin can acknowledge a G0/G1 as soon as it is
-    # queued, before the stepper motion has physically completed. On CH340-
-    # connected Creality boards, closing the serial session immediately after
-    # that acknowledgement can reset/reinitialize the controller and interrupt
-    # the queued jog. Wait for the planner to drain before restoring absolute
-    # mode and before releasing the serial port.
-    commands = [
-        "G91",
-        f"G0 {axis}{distance_mm:g} F{feed_mm_min}",
-        "M400",
-        "G90",
-        "M400",
-    ]
     responses: list[str] = []
     try:
         with SERIAL_LOCK:
@@ -461,20 +483,136 @@ def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, 
                 time.sleep(0.35)
                 port.reset_input_buffer()
 
+                # Home against the verified X/Y/Z minimum endstops, wait for the
+                # planner, then lift away from Z=0 before moving to bed center.
+                sequence = [
+                    ("G28", 60.0),
+                    ("M400", 15.0),
+                    ("G90", 5.0),
+                    ("G0 Z10 F300", 15.0),
+                    ("M400", 15.0),
+                    ("G0 X110 Y110 F1200", 30.0),
+                    ("M400", 30.0),
+                    ("M114", 5.0),
+                ]
+                last_lines: list[str] = []
+                for command, timeout_s in sequence:
+                    lines = _read_until_ok(port, command, timeout_s)
+                    responses.extend(f"{command}: {line}" for line in lines)
+                    last_lines = lines
+                    if any(line.startswith("Error:") for line in lines):
+                        raise HTTPException(status_code=409, detail=f"Marlin reported an error during {command}.")
+
+                try:
+                    position = parse_m114_response(last_lines)
+                except Exception:
+                    position = {"x": 110.0, "y": 110.0, "z": 10.0}
+
+    except HTTPException:
+        MOTION_REFERENCE["homed"] = False
+        MOTION_REFERENCE["centered"] = False
+        raise
+    except (serial.SerialException, OSError) as exc:
+        MOTION_REFERENCE["homed"] = False
+        MOTION_REFERENCE["centered"] = False
+        raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
+
+    MOTION_REFERENCE["homed"] = True
+    MOTION_REFERENCE["centered"] = True
+    return {
+        "ok": True,
+        "homed": True,
+        "centered": True,
+        "position_mm": position,
+        "limits_mm": AXIS_LIMITS_MM,
+        "response": responses,
+    }
+
+
+def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, Any]:
+    state = read_commissioning()
+    if not state["unlocked"]:
+        raise HTTPException(status_code=423, detail="Motion is locked until the commissioning checklist is complete.")
+
+    step = abs(float(distance_mm))
+    allowed_steps = COMMISSIONING_JOG_STEPS_MM | LARGE_JOG_STEPS_MM
+    if step not in allowed_steps:
+        raise HTTPException(status_code=400, detail="Jog step must be 0.1, 1, 5, 10, or 25 mm.")
+    if step in LARGE_JOG_STEPS_MM and not MOTION_REFERENCE["homed"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Large jogs require Home + Center first so software travel limits have a known coordinate reference.",
+        )
+
+    target = chosen_printer()
+    if not target:
+        raise HTTPException(status_code=409, detail="No high-confidence Creality/CH340 serial interface is connected.")
+
+    responses: list[str] = []
+    endstops: dict[str, str] = {}
+    position_before: dict[str, float] | None = None
+    position_after: dict[str, float] | None = None
+
+    try:
+        with SERIAL_LOCK:
+            with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+                time.sleep(1.0)
+                port.reset_input_buffer()
+                port.write(b"\n")
+                port.flush()
+                time.sleep(0.35)
+                port.reset_input_buffer()
+
+                # Always inspect physical minimum endstops immediately before
+                # motion. If a minimum switch is already active, never command
+                # farther into that switch.
+                m119 = _read_until_ok(port, "M119", 5.0)
+                responses.extend(f"M119: {line}" for line in m119)
+                endstops = _parse_endstops(m119)
+                if distance_mm < 0 and endstops.get(f"{axis.lower()}_min") == "TRIGGERED":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"{axis} minimum endstop is TRIGGERED; blocked motion farther toward the minimum.",
+                    )
+
+                # Once this service has homed the machine, use the firmware's
+                # reported position as a second layer of travel-limit protection.
+                if MOTION_REFERENCE["homed"]:
+                    m114 = _read_until_ok(port, "M114", 5.0)
+                    responses.extend(f"M114: {line}" for line in m114)
+                    position_before = parse_m114_response(m114)
+                    current = position_before[axis.lower()]
+                    target_position = current + distance_mm
+                    low, high = AXIS_LIMITS_MM[axis]
+                    if target_position < low - 1e-6 or target_position > high + 1e-6:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"Blocked {axis} jog: target {target_position:.2f} mm is outside "
+                                f"the software limit {low:.0f}–{high:.0f} mm."
+                            ),
+                        )
+
+                commands = [
+                    "G91",
+                    f"G0 {axis}{distance_mm:g} F{feed_mm_min}",
+                    "M400",
+                    "G90",
+                    "M400",
+                ]
                 for command in commands:
-                    port.write((command + "\n").encode("ascii"))
-                    port.flush()
-                    deadline = time.monotonic() + 4.0
-                    while time.monotonic() < deadline:
-                        raw = port.readline()
-                        if not raw:
-                            continue
-                        line = raw.decode("utf-8", errors="replace").strip()
-                        if not line:
-                            continue
-                        responses.append(f"{command}: {line}")
-                        if line == "ok" or line.startswith("Error:"):
-                            break
+                    lines = _read_until_ok(port, command, 15.0)
+                    responses.extend(f"{command}: {line}" for line in lines)
+                    if any(line.startswith("Error:") for line in lines):
+                        raise HTTPException(status_code=409, detail=f"Marlin reported an error during {command}.")
+
+                if MOTION_REFERENCE["homed"]:
+                    m114_after = _read_until_ok(port, "M114", 5.0)
+                    responses.extend(f"M114: {line}" for line in m114_after)
+                    position_after = parse_m114_response(m114_after)
+
+    except HTTPException:
+        raise
     except (serial.SerialException, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Serial error: {exc}")
 
@@ -484,6 +622,10 @@ def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, 
         "distance_mm": distance_mm,
         "feed_mm_min": feed_mm_min,
         "waited_for_motion": True,
+        "homed_reference": MOTION_REFERENCE["homed"],
+        "endstops": endstops,
+        "position_before_mm": position_before,
+        "position_after_mm": position_after,
         "response": responses,
     }
 
@@ -648,6 +790,8 @@ def api_printer_status() -> dict[str, Any]:
         "selected": selected,
         "candidates": ports,
         "commissioning_locked": not read_commissioning()["unlocked"],
+        "motion_reference": dict(MOTION_REFERENCE),
+        "limits_mm": AXIS_LIMITS_MM,
         "allowed_commands": sorted(SAFE_COMMANDS),
     }
 
@@ -770,6 +914,11 @@ def api_commissioning_update(payload: CommissioningRequest) -> dict[str, Any]:
 @app.post("/api/printer/jog", dependencies=[Depends(require_token)])
 def api_printer_jog(payload: JogRequest) -> dict[str, Any]:
     return serial_motion(payload.axis, payload.distance_mm, payload.feed_mm_min)
+
+
+@app.post("/api/printer/home-center", dependencies=[Depends(require_token)])
+def api_printer_home_center() -> dict[str, Any]:
+    return home_and_center()
 
 
 @app.post("/api/printer/emergency-stop", dependencies=[Depends(require_token)])

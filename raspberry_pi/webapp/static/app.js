@@ -1190,12 +1190,14 @@ async function sliceStlForSyringe(){
   const travelLift=Number($("slicerTravelLift").value);
   const crosslinkMode=$("slicerCrosslinkMode").value;
   const supportStrategy=$("slicerSupportStrategy").value;
+  const temperatureMode=$("slicerTemperatureMode").value;
+  const bedTemperature=Number($("slicerBedTemperature").value);
   const printFeed=Number($("slicerPrintFeed").value);
   const travelFeed=Number($("slicerTravelFeed").value);
   const eStepsCalibrated=$("slicerEstepsCalibrated").checked;
   const motorDirectionVerified=$("slicerMotorDirectionVerified").checked;
 
-  const values=[layerHeight,beadWidth,infill,syringeDiameter,syringeCapacity,needleDiameter,alginatePercent,calciumMm,extrusionMultiplier,travelLift,printFeed,travelFeed];
+  const values=[layerHeight,beadWidth,infill,syringeDiameter,syringeCapacity,needleDiameter,alginatePercent,calciumMm,extrusionMultiplier,travelLift,bedTemperature,printFeed,travelFeed];
   if(values.some(v=>!Number.isFinite(v))){
     $("slicerMessage").textContent="Enter valid numeric slicer settings.";
     return;
@@ -1222,6 +1224,8 @@ async function sliceStlForSyringe(){
         calcium_chloride_mM:calciumMm,
         crosslink_mode:crosslinkMode,
         support_strategy:supportStrategy,
+        temperature_mode:temperatureMode,
+        bed_temperature_c:bedTemperature,
         extrusion_multiplier:extrusionMultiplier,
         travel_lift_mm:travelLift,
         print_feed_mm_min:Math.round(printFeed),
@@ -1254,6 +1258,7 @@ async function sliceStlForSyringe(){
       ["Alginate",s.material_profile?.alginate_percent_wv==null?"—":Number(s.material_profile.alginate_percent_wv).toFixed(1)+"% w/v"],
       ["Crosslinking",s.crosslink_mode||"—"],
       ["Support strategy",s.support_strategy||"—"],
+      ["Temperature",s.temperature_mode==="heated_bed"?(Number(s.bed_temperature_c).toFixed(0)+" °C bed"):"Ambient / heaters off"],
       ["Unsupported path",s.unsupported_path_ratio==null?"—":(Number(s.unsupported_path_ratio)*100).toFixed(1)+"%"],
       ["E per XY mm",s.e_per_xy_mm==null?"—":Number(s.e_per_xy_mm).toFixed(8)+" mm plunger/mm"],
       ["Estimated plunger travel",s.estimated_plunger_travel_mm==null?"—":Number(s.estimated_plunger_travel_mm).toFixed(4)+" mm"],
@@ -1766,6 +1771,11 @@ $("sliceStl").onclick=()=>sliceStlForSyringe();
 $("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
 $("slicerLayerPreview").oninput=()=>drawSlicerPreview(state.planSummary);
 $("slicerShowAllLayers").onchange=()=>drawSlicerPreview(state.planSummary);
+$("slicerTemperatureMode").onchange=()=>{
+  const heated=$("slicerTemperatureMode").value==="heated_bed";
+  $("slicerBedTemperature").disabled=!heated;
+  if(!heated)$("slicerBedTemperature").value="0";
+};
 $("calculateSyringeMotion").onclick=()=>calculateSyringeMotion();
 
 $("startExperiment").onclick=()=>startExperimentSession();

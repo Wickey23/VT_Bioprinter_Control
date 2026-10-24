@@ -1309,6 +1309,7 @@ function updatePrintStartReadiness(){
   const confirmed=!!$("confirmPhysicalStop")?.checked;
   const clearance=!!$("confirmXClearance")?.checked;
   const clean=!!$("confirmSurfaceClean")?.checked;
+  $("startDryRun").disabled=running||!confirmed||!clearance;
   $("startPhysicalPrint").disabled=running||!confirmed||!clearance||!clean;
 }
 
@@ -1411,6 +1412,36 @@ function stopPrintCameraView(){
   $("printCameraImage").removeAttribute("src");
   $("printCameraPlaceholder").style.display="";
   $("printCameraPlaceholder").textContent="D405 live view will start with the print.";
+}
+
+async function startDryRun(){
+  if(!$("confirmPhysicalStop").checked){
+    $("printRunnerMessage").textContent="Confirm that the physical power cutoff is immediately reachable.";
+    return;
+  }
+  if(!$("confirmXClearance").checked){
+    $("printRunnerMessage").textContent="Verify Enderstruder/X-endstop clearance before homing.";
+    return;
+  }
+  if(!confirm("Run the loaded toolpath as XYZ motion only? Syringe extrusion will be removed. The printer will still home and move."))return;
+
+  $("printRunnerMessage").textContent="Starting motion-only dry run…";
+  $("preprintCalibrationDetails").innerHTML=
+    '<div><span>Mode</span><strong>MOTION ONLY</strong><small>All E extrusion commands removed.</small></div>';
+  try{
+    const p=await api("/api/print/dry-run",{
+      method:"POST",
+      body:JSON.stringify({
+        confirm_physical_stop_available:true,
+        confirm_x_endstop_clearance:true
+      })
+    });
+    renderPrintRunner(p);
+    $("printRunnerMessage").textContent="Motion-only dry run started. Extrusion is disabled.";
+  }catch(err){
+    $("printRunnerMessage").textContent="Dry run blocked: "+err.message;
+    await loadPrintRunner().catch(()=>{});
+  }
 }
 
 async function startPhysicalPrint(){
@@ -1998,6 +2029,7 @@ $("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
 $("confirmPhysicalStop").onchange=()=>updatePrintStartReadiness();
 $("confirmXClearance").onchange=()=>updatePrintStartReadiness();
 $("confirmSurfaceClean").onchange=()=>updatePrintStartReadiness();
+$("startDryRun").onclick=()=>startDryRun();
 $("startPhysicalPrint").onclick=()=>startPhysicalPrint();
 $("pausePhysicalPrint").onclick=()=>pausePhysicalPrint();
 $("resumePhysicalPrint").onclick=()=>resumePhysicalPrint();

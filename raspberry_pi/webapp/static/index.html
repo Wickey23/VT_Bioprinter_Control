@@ -201,8 +201,8 @@
         <article class="card">
           <div class="card-title">
             <div>
-              <p class="eyebrow">Commissioning motion</p>
-              <h3>Controlled X / Y / Z jog</h3>
+              <p class="eyebrow">Safe motion control</p>
+              <h3>Endstop-aware X / Y / Z jog</h3>
             </div>
             <span id="motionBadge" class="lock-badge">LOCKED</span>
           </div>
@@ -211,9 +211,16 @@
               <select id="jogStep">
                 <option value="0.1">0.1 mm</option>
                 <option value="1" selected>1.0 mm</option>
+                <option value="5">5 mm</option>
+                <option value="10">10 mm</option>
+                <option value="25">25 mm</option>
               </select>
             </label>
-            <span class="muted">Feed: 300 mm/min</span>
+            <span class="muted">Large steps require a Home + Center reference.</span>
+          </div>
+          <div class="locked-controls">
+            <button id="homeCenter" class="primary" disabled>Home + Center</button>
+            <span class="muted">Homes X/Y/Z on the verified endstops, lifts to Z=10 mm, then moves X/Y to 110/110 mm.</span>
           </div>
           <div class="control-preview">
             <div class="axis-pad">

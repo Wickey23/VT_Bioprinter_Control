@@ -66,6 +66,120 @@ G1 X0 Y0 E4
     assert_close(float(plan["extruding_motion_mm"]), 40.0, 1e-5, "extruding path")
 
 
+def test_syringe_stl_slicer() -> None:
+    # 10 x 10 x 1 mm ASCII STL box, sufficient to test layer intersection,
+    # contour generation, infill, and syringe E conversion offline.
+    stl = b"""solid box
+facet normal 0 0 -1
+ outer loop
+  vertex 0 0 0
+  vertex 10 10 0
+  vertex 10 0 0
+ endloop
+endfacet
+facet normal 0 0 -1
+ outer loop
+  vertex 0 0 0
+  vertex 0 10 0
+  vertex 10 10 0
+ endloop
+endfacet
+facet normal 0 0 1
+ outer loop
+  vertex 0 0 1
+  vertex 10 0 1
+  vertex 10 10 1
+ endloop
+endfacet
+facet normal 0 0 1
+ outer loop
+  vertex 0 0 1
+  vertex 10 10 1
+  vertex 0 10 1
+ endloop
+endfacet
+facet normal 0 -1 0
+ outer loop
+  vertex 0 0 0
+  vertex 10 0 0
+  vertex 10 0 1
+ endloop
+endfacet
+facet normal 0 -1 0
+ outer loop
+  vertex 0 0 0
+  vertex 10 0 1
+  vertex 0 0 1
+ endloop
+endfacet
+facet normal 1 0 0
+ outer loop
+  vertex 10 0 0
+  vertex 10 10 0
+  vertex 10 10 1
+ endloop
+endfacet
+facet normal 1 0 0
+ outer loop
+  vertex 10 0 0
+  vertex 10 10 1
+  vertex 10 0 1
+ endloop
+endfacet
+facet normal 0 1 0
+ outer loop
+  vertex 10 10 0
+  vertex 0 10 0
+  vertex 0 10 1
+ endloop
+endfacet
+facet normal 0 1 0
+ outer loop
+  vertex 10 10 0
+  vertex 0 10 1
+  vertex 10 10 1
+ endloop
+endfacet
+facet normal -1 0 0
+ outer loop
+  vertex 0 10 0
+  vertex 0 0 0
+  vertex 0 0 1
+ endloop
+endfacet
+facet normal -1 0 0
+ outer loop
+  vertex 0 10 0
+  vertex 0 0 1
+  vertex 0 10 1
+ endloop
+endfacet
+endsolid box
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        original = print_plan.ACTIVE_PLAN
+        try:
+            print_plan.ACTIVE_PLAN = Path(tmp) / "active.json"
+            result = print_plan.slice_stl_to_syringe_gcode(
+                stl,
+                filename="box.stl",
+                layer_height_mm=0.5,
+                bead_width_mm=0.8,
+                infill_percent=20.0,
+                syringe_diameter_mm=14.5,
+            )
+        finally:
+            print_plan.ACTIVE_PLAN = original
+
+    summary = result["summary"]
+    if int(summary["generated_layers"]) < 1:
+        raise AssertionError("Expected at least one generated slicer layer")
+    if float(summary["estimated_plunger_travel_mm"]) <= 0:
+        raise AssertionError("Expected positive syringe plunger travel")
+    if " E" not in result["gcode"]:
+        raise AssertionError("Expected syringe E moves in generated G-code")
+
+
 def test_projection_math() -> None:
     profile = {
         "camera": {
@@ -165,6 +279,7 @@ def main() -> int:
     tests = [
         ("rigid transform", test_rigid_transform),
         ("G-code parser", test_gcode_parser),
+        ("syringe STL slicer", test_syringe_stl_slicer),
         ("projection math", test_projection_math),
         ("quality engine", test_quality_engine),
         ("vision tracker", test_vision_tracker),

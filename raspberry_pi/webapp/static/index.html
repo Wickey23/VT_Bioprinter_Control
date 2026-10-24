@@ -594,15 +594,35 @@
             </div>
           </div>
 
-          <div class="jog-toolbar">
-            <label>Preview layer
-              <input id="slicerLayerPreview" type="range" min="0" max="0" value="0" step="1" disabled>
-            </label>
-            <span id="slicerLayerPreviewLabel" class="muted">All layers</span>
-            <label><input id="slicerShowAllLayers" type="checkbox" checked> Show all layers</label>
+          <div class="preview-mode-toolbar">
+            <div class="segmented-control" role="group" aria-label="Preview mode">
+              <button id="preview3dMode" class="secondary active" type="button">3D Preview</button>
+              <button id="preview2dMode" class="secondary" type="button">2D Layers</button>
+            </div>
+            <div class="preview-actions">
+              <label><input id="previewShowModel" type="checkbox" checked> Model</label>
+              <label><input id="previewShowToolpath" type="checkbox" checked> Toolpath</label>
+              <button id="previewFit" class="secondary" type="button">Fit</button>
+              <button id="previewReset" class="secondary" type="button">Reset view</button>
+            </div>
           </div>
-          <div class="slicer-preview-wrap">
-            <canvas id="slicerPreview" width="720" height="420" aria-label="2D preview of syringe-sliced toolpaths"></canvas>
+
+          <div id="preview3dPanel" class="slicer-preview-wrap slicer-3d-wrap">
+            <canvas id="slicerPreview3d" width="900" height="560" aria-label="Interactive 3D STL and syringe toolpath preview"></canvas>
+            <div class="preview-hint">Drag to orbit · Shift+drag to pan · Wheel to zoom</div>
+          </div>
+
+          <div id="preview2dPanel" hidden>
+            <div class="jog-toolbar">
+              <label>Preview layer
+                <input id="slicerLayerPreview" type="range" min="0" max="0" value="0" step="1" disabled>
+              </label>
+              <span id="slicerLayerPreviewLabel" class="muted">All layers</span>
+              <label><input id="slicerShowAllLayers" type="checkbox" checked> Show all layers</label>
+            </div>
+            <div class="slicer-preview-wrap">
+              <canvas id="slicerPreview" width="720" height="420" aria-label="2D preview of syringe-sliced toolpaths"></canvas>
+            </div>
           </div>
           <p class="muted">This planner intentionally does not generate ordinary FDM-style removable supports from the same alginate syringe. Unsupported geometry is measured and must be addressed with self-supporting design, a support bath, or a separate/manual scaffold strategy.</p>
         </article>

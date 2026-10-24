@@ -540,7 +540,15 @@
                 <option value="manual_scaffold">Manual / second-material scaffold</option>
               </select>
             </label>
+            <label>Temperature mode
+              <select id="slicerTemperatureMode">
+                <option value="ambient" selected>Ambient / heaters off</option>
+                <option value="heated_bed">Heated bed only</option>
+              </select>
+            </label>
+            <label>Bed temperature (°C)<input id="slicerBedTemperature" type="number" step="1" min="0" max="60" value="0"></label>
           </div>
+          <p class="muted">Syringe/hotend heating is disabled in this workflow. Ambient mode emits M104 S0 and M140 S0. Heated-bed mode may use the bed only; dedicated syringe heating would require separate validated hardware.</p>
 
           <p class="eyebrow">Syringe & needle</p>
           <div class="calibration-form">

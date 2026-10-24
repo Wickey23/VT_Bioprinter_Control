@@ -1110,7 +1110,7 @@ function drawSlicerPreview(plan){
     const t=((Number(s.layer)||0)-minLayer)/layerSpan;
     const hue=190+Math.round(95*t);
     ctx.strokeStyle="hsl("+hue+" 80% 60%)";
-    ctx.globalAlpha=showAll?.65:1;
+    ctx.globalAlpha=showAll?0.65:1;
     ctx.lineWidth=showAll?1.4:2.2;
     ctx.beginPath();
     ctx.moveTo(ox+Number(s.start[0])*scale,oy-Number(s.start[1])*scale);

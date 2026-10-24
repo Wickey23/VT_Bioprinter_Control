@@ -27,7 +27,10 @@ const state={
   slicedGcode:null,
   slicedFilename:null,
   slicerPreflightReady:false,
-  printState:null
+  printState:null,
+  printCameraActive:false,
+  printCameraGeneration:0,
+  printCameraObjectUrl:null
 };
 
 async function api(path,opts={}){
@@ -1335,6 +1338,11 @@ function renderPrintRunner(p){
   if(metrics.excess_off_path_samples!=null)rows.push(["Off-path samples",metrics.excess_off_path_samples]);
   $("printVisionDetails").innerHTML=rows.map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 
+  if(running&&!state.printCameraActive)startPrintCameraView().catch(()=>{});
+  if(!running&&["COMPLETE","STOPPED","ERROR","EMERGENCY_STOP"].includes(stateName)&&state.printCameraActive){
+    stopPrintCameraView();
+  }
+
   if(p.error){
     $("printRunnerMessage").textContent="Print error: "+p.error;
   }else if(monitor.message&&monitor.last_checked_layer!=null){
@@ -1354,6 +1362,55 @@ async function loadPrintRunner(){
   return p;
 }
 
+async function startPrintCameraView(){
+  if(state.printCameraActive)return;
+  try{
+    const live=await api("/api/camera/live/status");
+    if(!live.running){
+      const started=await api("/api/camera/live/start",{method:"POST"});
+      if(started.error)throw new Error(started.error);
+    }
+  }catch(err){
+    $("printCameraPlaceholder").textContent="D405 unavailable: "+err.message;
+    return;
+  }
+
+  state.printCameraActive=true;
+  const generation=++state.printCameraGeneration;
+  $("printCameraPlaceholder").textContent="Starting D405 live view…";
+
+  while(state.printCameraActive&&generation===state.printCameraGeneration){
+    try{
+      const blob=await fetchCameraBlob("/api/camera/color.jpg");
+      const next=URL.createObjectURL(blob);
+      const prev=state.printCameraObjectUrl;
+      state.printCameraObjectUrl=next;
+      $("printCameraImage").src=next;
+      $("printCameraImage").classList.add("visible");
+      $("printCameraPlaceholder").style.display="none";
+      $("printCameraStage").classList.add("has-image");
+      if(prev)URL.revokeObjectURL(prev);
+    }catch(err){
+      $("printCameraPlaceholder").style.display="";
+      $("printCameraPlaceholder").textContent="D405 live view error: "+err.message;
+    }
+    await new Promise(resolve=>setTimeout(resolve,500));
+  }
+}
+
+function stopPrintCameraView(){
+  state.printCameraActive=false;
+  state.printCameraGeneration++;
+  if(state.printCameraObjectUrl){
+    URL.revokeObjectURL(state.printCameraObjectUrl);
+    state.printCameraObjectUrl=null;
+  }
+  $("printCameraImage").classList.remove("visible");
+  $("printCameraImage").removeAttribute("src");
+  $("printCameraPlaceholder").style.display="";
+  $("printCameraPlaceholder").textContent="D405 live view will start with the print.";
+}
+
 async function startPhysicalPrint(){
   if(!$("confirmPhysicalStop").checked){
     $("printRunnerMessage").textContent="Confirm that the physical power cutoff is immediately reachable.";
@@ -1362,6 +1419,7 @@ async function startPhysicalPrint(){
   if(!confirm("Start the loaded bioprint now? The printer will physically home/move/extrude according to the loaded G-code. Keep the physical power cutoff within reach."))return;
   $("printRunnerMessage").textContent="Starting physical print…";
   try{
+    await startPrintCameraView();
     const p=await api("/api/print/start",{
       method:"POST",
       body:JSON.stringify({confirm_physical_stop_available:true})

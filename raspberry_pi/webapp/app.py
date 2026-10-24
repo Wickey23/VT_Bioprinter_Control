@@ -1559,16 +1559,6 @@ def api_print_start(payload: PrintStartRequest) -> dict[str, Any]:
         )
 
     preflight = slicer.get("preflight") or {}
-    if not preflight.get("ready_for_physical_print"):
-        blocking = [
-            check.get("name", "check")
-            for check in preflight.get("checks", [])
-            if not check.get("ok")
-        ]
-        detail = "Physical print preflight is blocked"
-        if blocking:
-            detail += ": " + ", ".join(blocking)
-        raise HTTPException(status_code=409, detail=detail + ".")
 
     gcode = plan.get("source_gcode")
     if not isinstance(gcode, str) or not gcode.strip():
@@ -1587,6 +1577,17 @@ def api_print_start(payload: PrintStartRequest) -> dict[str, Any]:
             target=target,
             confirm_surface_clean=payload.confirm_surface_clean,
         )
+
+    if not preflight.get("ready_for_physical_print"):
+        blocking = [
+            check.get("name", "check")
+            for check in preflight.get("checks", [])
+            if not check.get("ok")
+        ]
+        detail = "Automatic pre-print calibration completed, but physical print preflight is still blocked"
+        if blocking:
+            detail += ": " + ", ".join(blocking)
+        raise HTTPException(status_code=409, detail=detail + ".")
 
     monitor_callback = _print_monitor_callback if load_profile() and load_profile().get("surface_baseline") else None
     try:

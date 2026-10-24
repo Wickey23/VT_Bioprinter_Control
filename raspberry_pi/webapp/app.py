@@ -457,7 +457,7 @@ def _read_until_ok(port: serial.Serial, command: str, timeout_s: float = 5.0) ->
 def _parse_endstops(lines: list[str]) -> dict[str, str]:
     states: dict[str, str] = {}
     for line in lines:
-        match = re.match(r"^(x_min|y_min|z_min):\\s*(open|TRIGGERED)$", line, re.IGNORECASE)
+        match = re.match(r"^(x_min|y_min|z_min):\s*(open|TRIGGERED)$", line, re.IGNORECASE)
         if match:
             states[match.group(1).lower()] = match.group(2).upper()
     return states

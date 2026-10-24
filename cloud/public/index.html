@@ -1,22 +1,25 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#0b1220" />
-  <title>VT Bioprinter Controller</title>
-  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
-  <link rel="stylesheet" href="/assets/styles.css?v=cloud2" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>VT Bioprinter Cloud</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/styles.css?v=cloud3">
 </head>
 <body>
   <div id="loginOverlay" class="overlay">
     <form id="loginForm" class="login-card">
       <div class="brand-mark">VT</div>
-      <h1>Bioprinter Controller</h1>
-      <p>Enter the cloud controller access key.</p>
-      <input id="tokenInput" type="password" autocomplete="current-password" placeholder="Controller access key" required />
+      <div>
+        <p class="eyebrow">Virginia Tech Research Controller</p>
+        <h1>Bioprinter Cloud</h1>
+      </div>
+      <p class="muted">Enter the cloud controller access key.</p>
+      <input id="tokenInput" type="password" autocomplete="current-password" placeholder="Cloud access key" required>
       <button class="primary" type="submit">Open Controller</button>
-      <div id="loginError" class="error"></div>
+      <p id="loginError" class="error"></p>
     </form>
   </div>
 
@@ -29,21 +32,18 @@
           <span>Cloud Control</span>
         </div>
       </div>
+
       <nav>
         <button class="nav-btn active" data-page="dashboard">Dashboard</button>
         <button class="nav-btn" data-page="printer">Printer</button>
         <button class="nav-btn" data-page="camera">Camera</button>
-        <button class="nav-btn" data-page="calibration">Calibration</button>
-        <button class="nav-btn" data-page="monitor">Monitor</button>
         <button class="nav-btn" data-page="print">Print</button>
-        <button class="nav-btn" data-page="experiments">Experiments</button>
-        <button class="nav-btn" data-page="analytics">Analytics</button>
-        <button class="nav-btn" data-page="network" disabled title="Configure Wi-Fi from the local Raspberry Pi interface">Network (local)</button>
         <button class="nav-btn" data-page="system">System</button>
       </nav>
+
       <div class="sidebar-footer">
         <span id="sidebarDot" class="dot"></span>
-        <span id="sidebarStatus">Checking controller…</span>
+        <span id="sidebarStatus">Checking cloud…</span>
       </div>
     </aside>
 
@@ -53,62 +53,42 @@
           <p class="eyebrow">Virginia Tech Research Controller</p>
           <h1 id="pageTitle">Dashboard</h1>
         </div>
-        <button id="refreshAll" class="ghost">Refresh</button>
+        <div class="header-actions">
+          <span id="cloudBadge" class="pill">CHECKING</span>
+          <button id="refreshAll" class="ghost">Refresh</button>
+        </div>
       </header>
 
       <section id="page-dashboard" class="page active">
         <div class="status-banner">
           <div>
-            <span class="status-label">SYSTEM STATUS</span>
-            <h2 id="heroStatus">Controller online</h2>
-            <p id="heroSub">Waiting for live system data.</p>
+            <span class="status-label">REMOTE CONTROL PLATFORM</span>
+            <h2 id="heroStatus">Checking cloud service…</h2>
+            <p id="heroSub">Waiting for the Vercel API and Raspberry Pi device state.</p>
           </div>
-          <div id="heroPill" class="pill">CHECKING</div>
+          <span id="heroPill" class="pill">CHECKING</span>
         </div>
 
         <div class="grid four">
           <article class="card metric">
+            <span>Cloud</span>
+            <strong id="cloudState">—</strong>
+            <small id="cloudVersion">Vercel</small>
+          </article>
+          <article class="card metric">
             <span>Raspberry Pi</span>
             <strong id="piState">—</strong>
-            <small id="piHost">—</small>
+            <small id="piHost">Not paired</small>
           </article>
           <article class="card metric">
             <span>Printer</span>
             <strong id="printerState">—</strong>
-            <small id="printerDevice">—</small>
+            <small id="printerDevice">Creality controller</small>
           </article>
           <article class="card metric">
             <span>RealSense</span>
             <strong id="cameraState">—</strong>
-            <small id="cameraModel">—</small>
-          </article>
-          <article class="card metric">
-            <span>Wi-Fi</span>
-            <strong id="wifiState">—</strong>
-            <small id="wifiIp">—</small>
-          </article>
-        </div>
-
-        <div class="grid four">
-          <article class="card metric">
-            <span>Calibration</span>
-            <strong id="dashboardCalibration">—</strong>
-            <small id="dashboardBaseline">—</small>
-          </article>
-          <article class="card metric">
-            <span>Print plan</span>
-            <strong id="dashboardPlan">—</strong>
-            <small id="dashboardPlanFile">—</small>
-          </article>
-          <article class="card metric">
-            <span>Experiment</span>
-            <strong id="dashboardExperiment">—</strong>
-            <small id="dashboardExperimentName">—</small>
-          </article>
-          <article class="card metric">
-            <span>Decision mode</span>
-            <strong id="dashboardMode">OBSERVE</strong>
-            <small>No autonomous correction</small>
+            <small id="cameraModel">Intel D405</small>
           </article>
         </div>
 
@@ -116,28 +96,32 @@
           <article class="card">
             <div class="card-title">
               <div>
-                <p class="eyebrow">Printer safety</p>
-                <h3>Commissioning state</h3>
+                <p class="eyebrow">Device connection</p>
+                <h3>Raspberry Pi bridge</h3>
               </div>
-              <span id="dashboardLockBadge" class="lock-badge">LOCKED</span>
+              <span id="pairBadge" class="pill">NOT PAIRED</span>
             </div>
-            <p id="commissioningSummary">Motion remains disabled until the physical commissioning checklist is complete.</p>
-            <button class="secondary nav-jump" data-target="printer">Open printer commissioning</button>
+            <div class="detail-list">
+              <div><span>Device ID</span><strong id="deviceId">—</strong></div>
+              <div><span>Hostname</span><strong id="deviceHost">—</strong></div>
+              <div><span>Cloud route</span><strong>Vercel → Pi</strong></div>
+            </div>
+            <p id="pairMessage" class="muted">The cloud site is ready. Raspberry Pi pairing is the next step.</p>
           </article>
 
           <article class="card">
             <div class="card-title">
               <div>
-                <p class="eyebrow">Host</p>
-                <h3>Pi health</h3>
+                <p class="eyebrow">Safety</p>
+                <h3>Remote-control boundaries</h3>
               </div>
             </div>
-            <div class="detail-list">
-              <div><span>CPU temperature</span><strong id="cpuTemp">—</strong></div>
-              <div><span>Storage used</span><strong id="diskUsed">—</strong></div>
-              <div><span>Storage free</span><strong id="diskFree">—</strong></div>
+            <div class="safety-list">
+              <div>Printer motion still uses the Pi commissioning gate.</div>
+              <div>Network changes remain local-only.</div>
+              <div>Physical power-off remains the primary emergency stop.</div>
+              <div>Port 8080 stays private.</div>
             </div>
-            <div class="progress"><div id="diskBar"></div></div>
           </article>
         </div>
       </section>
@@ -146,82 +130,33 @@
         <div class="grid two">
           <article class="card">
             <div class="card-title">
-              <div>
-                <p class="eyebrow">USB / Marlin</p>
-                <h3>Printer connection</h3>
-              </div>
-              <span id="printerConnectionBadge" class="pill">CHECKING</span>
+              <div><p class="eyebrow">Printer</p><h3>Connection</h3></div>
+              <span id="printerConnectionBadge" class="pill">OFFLINE</span>
             </div>
-            <div id="printerDetails" class="detail-list"></div>
-            <button id="refreshPrinter" class="secondary">Detect printer</button>
+            <div id="printerDetails" class="detail-list">
+              <div><span>Status</span><strong>Waiting for Pi pairing</strong></div>
+            </div>
           </article>
 
           <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Read-only diagnostics</p>
-                <h3>Safe Marlin probe</h3>
-              </div>
-              <span class="lock-badge">NO MOTION</span>
-            </div>
+            <p class="eyebrow">Remote diagnostics</p>
+            <h3>Marlin commands</h3>
             <div class="command-grid">
               <button class="safe-command" data-command="M115">M115<br><small>Firmware</small></button>
               <button class="safe-command" data-command="M119">M119<br><small>Endstops</small></button>
-              <button class="safe-command" data-command="M503">M503<br><small>Settings</small></button>
               <button class="safe-command" data-command="M114">M114<br><small>Position</small></button>
               <button class="safe-command" data-command="M105">M105<br><small>Temperature</small></button>
             </div>
-            <pre id="terminal">Printer diagnostics will appear here.</pre>
+            <pre id="terminal">Pair the Raspberry Pi to enable diagnostics.</pre>
           </article>
         </div>
 
         <article class="card">
           <div class="card-title">
-            <div>
-              <p class="eyebrow">Commissioning gate</p>
-              <h3>Enable tiny jog tests</h3>
-            </div>
-            <span id="commissioningBadge" class="lock-badge">LOCKED</span>
-          </div>
-          <p>Confirm each physical item before motion is enabled. This does not replace a physical power stop.</p>
-          <div class="checklist" id="commissioningChecklist">
-            <label><input type="checkbox" data-key="motors_connected"> X/Y/Z motors are connected to the intended outputs</label>
-            <label><input type="checkbox" data-key="endstops_verified"> X/Y/Z endstop states were physically verified with M119</label>
-            <label><input type="checkbox" data-key="workspace_clear"> Tooling, syringes, hands, and cables are clear of moving parts</label>
-            <label><input type="checkbox" data-key="main_power_ready"> Printer main PSU is powered and ready for stepper motion</label>
-            <label><input type="checkbox" data-key="physical_stop_ready"> Physical power-off / emergency stop is immediately reachable</label>
-          </div>
-          <div class="locked-controls">
-            <button id="saveCommissioning" class="primary">Save commissioning state</button>
-            <button id="lockMotion" class="danger-outline">Lock motion</button>
-          </div>
-          <p id="commissioningMessage" class="muted"></p>
-        </article>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Safe motion control</p>
-              <h3>Endstop-aware X / Y / Z jog</h3>
-            </div>
+            <div><p class="eyebrow">Motion</p><h3>Remote jog</h3></div>
             <span id="motionBadge" class="lock-badge">LOCKED</span>
           </div>
-          <div class="jog-toolbar">
-            <label>Step
-              <select id="jogStep">
-                <option value="0.1">0.1 mm</option>
-                <option value="1" selected>1.0 mm</option>
-                <option value="5">5 mm</option>
-                <option value="10">10 mm</option>
-                <option value="25">25 mm</option>
-              </select>
-            </label>
-            <span class="muted">Large steps require a Home + Center reference.</span>
-          </div>
-          <div class="locked-controls">
-            <button id="homeCenter" class="primary" disabled>Home + Center</button>
-            <span class="muted">Homes X/Y/Z on the verified endstops, lifts to Z=10 mm, then moves X/Y to 110/110 mm.</span>
-          </div>
+          <p class="muted">Remote motion will use the same commissioning and software-limit checks as the local controller.</p>
           <div class="control-preview">
             <div class="axis-pad">
               <button class="jog-btn" data-axis="Y" data-sign="1" disabled>+Y</button>
@@ -236,18 +171,8 @@
               <button class="jog-btn" data-axis="Z" data-sign="1" disabled>Z +</button>
               <button class="jog-btn" data-axis="Z" data-sign="-1" disabled>Z −</button>
             </div>
-            <div class="syringe-controls">
-              <strong>Syringe control</strong>
-              <span class="muted">Still locked until syringe driver mapping and calibration are verified.</span>
-              <button disabled>Extrude</button>
-              <button disabled>Retract</button>
-            </div>
           </div>
-          <div class="emergency-row">
-            <button id="emergencyStop" class="emergency">SEND M112 EMERGENCY STOP</button>
-            <span>This is a software stop. Cut printer power for a hardware emergency.</span>
-          </div>
-          <pre id="motionLog">No motion commands sent.</pre>
+          <pre id="motionLog">Motion remains disabled until the Pi is paired and commissioning is valid.</pre>
         </article>
       </section>
 
@@ -255,589 +180,35 @@
         <div class="grid two">
           <article class="card">
             <div class="card-title">
-              <div>
-                <p class="eyebrow">Intel RealSense D405</p>
-                <h3>Depth camera</h3>
-              </div>
-              <span id="cameraBadge" class="pill">CHECKING</span>
+              <div><p class="eyebrow">Intel RealSense D405</p><h3>Camera state</h3></div>
+              <span id="cameraBadge" class="pill">OFFLINE</span>
             </div>
-            <div id="cameraDetails" class="detail-list"></div>
-            <div class="locked-controls">
-              <button id="refreshCamera" class="secondary">Refresh camera</button>
-              <button id="measureDepth" class="primary">Measure depth</button>
+            <div id="cameraDetails" class="detail-list">
+              <div><span>Status</span><strong>Waiting for Pi pairing</strong></div>
             </div>
-            <p id="cameraMessage" class="muted"></p>
           </article>
-
           <article class="card">
-            <p class="eyebrow">Center sensing</p>
-            <h3>Depth measurement</h3>
-            <div class="sensor-grid">
-              <div><span>Center</span><strong id="depthCenter">—</strong></div>
-              <div><span>ROI median</span><strong id="depthMedian">—</strong></div>
-              <div><span>ROI min</span><strong id="depthMin">—</strong></div>
-              <div><span>ROI max</span><strong id="depthMax">—</strong></div>
-            </div>
-            <p class="muted">Initial sensing uses the center 21×21 pixel region. This is a commissioning measurement, not yet a calibrated nozzle-to-bed measurement.</p>
-          </article>
-        </div>
-
-        <article class="card live-camera-card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Live RGB camera</p>
-              <h3>What the D405 sees</h3>
-            </div>
-            <span id="liveCameraBadge" class="pill">STOPPED</span>
-          </div>
-          <div class="live-toolbar">
-            <button id="startLiveCamera" class="primary" type="button" onclick="startLiveCamera(); return false;">Start live feed</button>
-            <button id="stopLiveCamera" class="secondary" type="button" onclick="stopLiveCamera(); return false;" disabled>Stop live feed</button>
-            <span id="liveCameraStats" class="muted">640×480 · target 15 FPS</span>
-          </div>
-          <div class="camera-stage live-stage">
-            <img id="colorImage" alt="Live RealSense D405 RGB camera view" />
-            <div id="colorPlaceholder">Start the live feed to see the camera view.</div>
-          </div>
-          <p class="muted camera-note">The live view uses the D405 left global-shutter imager through its onboard ISP. Depth sensing continues in the same camera pipeline.</p>
-        </article>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Depth visualization</p>
-              <h3>Latest D405 depth frame</h3>
-            </div>
-            <button id="refreshDepthImage" class="secondary">Capture depth frame</button>
-          </div>
-          <div class="camera-stage">
-            <img id="depthImage" alt="RealSense D405 depth visualization" />
-            <div id="depthPlaceholder">No depth frame captured yet.</div>
-          </div>
-        </article>
-      </section>
-
-      <section id="page-calibration" class="page">
-        <div class="grid two">
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Camera → printer coordinates</p>
-                <h3>Calibration status</h3>
-              </div>
-              <span id="calibrationBadge" class="pill">NOT CALIBRATED</span>
-            </div>
-            <div id="calibrationDetails" class="detail-list"></div>
-            <p id="calibrationMessage" class="muted">Capture a camera frame, then click the four bed corners in printer-coordinate order.</p>
-          </article>
-
-          <article class="card">
-            <p class="eyebrow">Printer bed geometry</p>
-            <h3>Reference dimensions</h3>
-            <div class="calibration-form">
-              <label>Origin X (mm)<input id="calOriginX" type="number" step="0.1" value="0"></label>
-              <label>Origin Y (mm)<input id="calOriginY" type="number" step="0.1" value="0"></label>
-              <label>Bed width X (mm)<input id="calBedWidth" type="number" step="0.1" value="220"></label>
-              <label>Bed depth Y (mm)<input id="calBedDepth" type="number" step="0.1" value="220"></label>
-            </div>
-            <p class="muted">220 × 220 mm is prefilled for the Ender-3 V2 base. Verify the actual usable bioprinter workspace before solving.</p>
-          </article>
-        </div>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Step 1</p>
-              <h3>Capture and mark the print bed</h3>
-            </div>
-            <span id="calibrationPointStatus" class="pill">0 / 4 POINTS</span>
-          </div>
-          <div class="live-toolbar">
-            <button id="captureCalibrationFrame" class="primary">Capture calibration frame</button>
-            <button id="resetCalibrationPoints" class="secondary">Reset points</button>
-            <button id="solveCalibration" class="secondary" disabled>Solve & save calibration</button>
-            <button id="clearCalibration" class="danger-outline">Clear saved calibration</button>
-          </div>
-          <div class="calibration-instructions">
-            Click in this order:
-            <strong>1 Front-left</strong> →
-            <strong>2 Front-right</strong> →
-            <strong>3 Rear-right</strong> →
-            <strong>4 Rear-left</strong>.
-          </div>
-          <div class="camera-stage calibration-stage" id="calibrationStage">
-            <img id="calibrationImage" alt="D405 calibration frame" />
-            <canvas id="calibrationCanvas"></canvas>
-            <div id="calibrationPlaceholder">Capture a frame to begin bed calibration.</div>
-          </div>
-          <div id="calibrationPointList" class="calibration-point-list"></div>
-        </article>
-
-        <div class="grid two">
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Step 2</p>
-                <h3>Nozzle / syringe-tip reference</h3>
-              </div>
-              <span id="nozzleBadge" class="pill">NOT SET</span>
-            </div>
-            <p>After bed calibration, capture a fresh frame and mark the visible syringe/nozzle tip. The system will convert it directly into printer X/Y/Z coordinates.</p>
-            <div class="locked-controls">
-              <button id="markNozzleTip" class="primary" disabled>Mark nozzle tip on image</button>
-            </div>
-            <div id="nozzleDetails" class="detail-list"></div>
-          </article>
-
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Step 3</p>
-                <h3>Reference surface analysis</h3>
-              </div>
-              <span id="surfaceBadge" class="pill">READY AFTER CALIBRATION</span>
-            </div>
-            <p>Sample the calibrated bed region and measure Z deviation from the fitted printer Z=0 plane.</p>
-            <div class="locked-controls">
-              <button id="analyzeCalibrationSurface" class="secondary" disabled>Analyze surface</button>
-              <button id="saveSurfaceBaseline" class="primary" disabled>Save as reference surface</button>
-            </div>
-            <p class="muted">The saved reference surface becomes the zero-height baseline for later deposition-height comparisons.</p>
-            <div id="surfaceMetrics" class="sensor-grid compact"></div>
-          </article>
-        </div>
-      </section>
-
-      <section id="page-monitor" class="page">
-        <div class="status-banner monitor-banner">
-          <div>
-            <span class="status-label">INTELLIGENT MONITORING</span>
-            <h2>Observe mode</h2>
-            <p>Live camera + calibrated printer coordinates. No autonomous printer actions are enabled.</p>
-          </div>
-          <div class="pill ok">OBSERVE</div>
-        </div>
-
-        <div class="grid two monitor-grid">
-          <article class="card monitor-view-card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Calibrated live view</p>
-                <h3>RGB + spatial overlay</h3>
-              </div>
-              <span id="monitorCameraBadge" class="pill">STOPPED</span>
-            </div>
-            <div class="live-toolbar">
-              <button id="startMonitor" class="primary">Start monitor</button>
-              <button id="stopMonitor" class="secondary" disabled>Stop monitor</button>
-              <button id="monitorSurfaceScan" class="secondary" disabled>Scan surface</button>
-            </div>
-            <div class="camera-stage calibration-stage monitor-stage">
-              <img id="monitorImage" alt="Calibrated live printer camera" />
-              <canvas id="monitorCanvas"></canvas>
-              <div id="monitorPlaceholder">Start the monitor to view calibrated printer coordinates.</div>
-            </div>
-            <p id="monitorMessage" class="muted">Calibration is required before spatial overlays are meaningful.</p>
-          </article>
-
-          <article class="card">
-            <p class="eyebrow">Live coordinate probe</p>
-            <h3>Printer-space measurement</h3>
-            <div class="sensor-grid">
-              <div><span>X</span><strong id="monitorX">—</strong></div>
-              <div><span>Y</span><strong id="monitorY">—</strong></div>
-              <div><span>Z</span><strong id="monitorZ">—</strong></div>
-              <div><span>Depth</span><strong id="monitorDepth">—</strong></div>
-            </div>
-            <p class="muted">Click anywhere in the live image to measure the corresponding 3D point in printer coordinates.</p>
-
-            <div class="monitor-section">
-              <p class="eyebrow">Printer-reported position</p>
-              <div id="monitorPrinterDetails" class="detail-list">
-                <div><span>Status</span><strong>Waiting</strong></div>
-              </div>
-              <p class="muted">M114 is read-only. Coordinates are meaningful only after the printer has a known coordinate reference.</p>
-            </div>
-
-            <div class="monitor-section">
-              <p class="eyebrow">Vision nozzle tracker</p>
-              <div id="monitorNozzleTrackDetails" class="detail-list">
-                <div><span>Status</span><strong>Reference required</strong></div>
-              </div>
-              <p class="muted">Experimental template tracker. Similarity confidence is informational only and never commands the printer.</p>
-            </div>
-
-            <div class="monitor-section">
-              <p class="eyebrow">Calibration</p>
-              <div id="monitorCalibrationDetails" class="detail-list"></div>
-            </div>
-
-            <div class="monitor-section">
-              <p class="eyebrow">Surface map</p>
-              <div id="monitorSurfaceDetails" class="detail-list"></div>
+            <p class="eyebrow">Live view</p>
+            <h3>Remote camera relay</h3>
+            <div class="camera-placeholder">
+              <span id="cameraPlaceholder">Camera stream becomes available after device pairing.</span>
             </div>
           </article>
         </div>
       </section>
 
       <section id="page-print" class="page">
-        <div class="grid two">
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Expected print geometry</p>
-                <h3>Load G-code plan</h3>
-              </div>
-              <span id="planBadge" class="pill">NO PLAN</span>
-            </div>
-            <p>Load the G-code that will be used for an experiment. The controller parses G0/G1 motion, extrusion, layers, and expected geometry. Loading a plan does not execute it.</p>
-            <div class="file-loader">
-              <input id="gcodeFile" type="file" accept=".gcode,.gc,.gco,.txt,text/plain">
-              <button id="loadGcode" class="primary">Load G-code</button>
-              <button id="clearGcode" class="danger-outline">Clear plan</button>
-            </div>
-            <p id="planMessage" class="muted">No print plan loaded.</p>
-          </article>
-
-          <article class="card">
-            <p class="eyebrow">Plan summary</p>
-            <h3>Parsed geometry</h3>
-            <div id="planDetails" class="detail-list"></div>
-          </article>
-        </div>
-
         <article class="card">
           <div class="card-title">
-            <div>
-              <p class="eyebrow">Bioprint preparation</p>
-              <h3>STL → syringe G-code slicer</h3>
-            </div>
-            <span class="pill">PREVIEW / GENERATE</span>
+            <div><p class="eyebrow">Bioprint preparation</p><h3>Cloud print workspace</h3></div>
+            <span class="pill">COMING ONLINE WITH PI</span>
           </div>
-          <p>Research slicer for sodium-alginate syringe extrusion. It plans XYZ travel, perimeter/infill deposition, volumetric plunger motion, travel lifts, support risk, crosslinking metadata, syringe usage, and print-readiness checks.</p>
-
-          <div class="file-loader">
-            <input id="slicerStlFile" type="file" accept=".stl,model/stl,application/sla">
-            <button id="sliceStl" class="primary">Plan alginate print</button>
-            <button id="downloadSlicedGcode" class="secondary" disabled>Download G-code</button>
-          </div>
-
-          <p class="eyebrow">Material & crosslinking</p>
-          <div class="calibration-form">
-            <label>Alginate concentration (% w/v)<input id="slicerAlginatePercent" type="number" step="0.1" min="0.1" max="20" value="3.0"></label>
-            <label>CaCl₂ concentration (mM)<input id="slicerCalciumMm" type="number" step="5" min="0" max="2000" value="80"></label>
-            <label>Crosslink mode
-              <select id="slicerCrosslinkMode">
-                <option value="post_print" selected>Post-print CaCl₂ treatment</option>
-                <option value="support_bath">CaCl₂ / support bath</option>
-                <option value="manual">Manual / external process</option>
-              </select>
-            </label>
-            <label>Support strategy
-              <select id="slicerSupportStrategy">
-                <option value="self_supporting" selected>Self-supporting geometry</option>
-                <option value="support_bath">Support bath</option>
-                <option value="manual_scaffold">Manual / second-material scaffold</option>
-              </select>
-            </label>
-            <label>Temperature mode
-              <select id="slicerTemperatureMode">
-                <option value="ambient" selected>Ambient / heaters off</option>
-                <option value="heated_bed">Heated bed only</option>
-              </select>
-            </label>
-            <label>Bed temperature (°C)<input id="slicerBedTemperature" type="number" step="1" min="0" max="60" value="0"></label>
-          </div>
-          <p class="muted">Syringe/hotend heating is disabled in this workflow. Ambient mode emits M104 S0 and M140 S0. Heated-bed mode may use the bed only; dedicated syringe heating would require separate validated hardware.</p>
-
-          <p class="eyebrow">Syringe & needle</p>
-          <div class="calibration-form">
-            <label>Syringe capacity (mL)<input id="slicerSyringeCapacity" type="number" step="0.5" min="0.1" max="100" value="10"></label>
-            <label>Syringe inner diameter (mm)<input id="slicerSyringeDiameter" type="number" step="0.01" min="1" max="50" value="14.5"></label>
-            <label>Needle inner diameter (mm)<input id="slicerNeedleDiameter" type="number" step="0.01" min="0.05" max="5" value="0.60"></label>
-            <label>Extrusion multiplier<input id="slicerExtrusionMultiplier" type="number" step="0.05" min="0.1" max="5" value="1.00"></label>
-          </div>
-
-          <p class="eyebrow">Geometry & motion</p>
-          <div class="calibration-form">
-            <label>Layer height (mm)<input id="slicerLayerHeight" type="number" step="0.05" min="0.05" max="5" value="0.30"></label>
-            <label>Bead / line width (mm)<input id="slicerBeadWidth" type="number" step="0.05" min="0.05" max="10" value="0.80"></label>
-            <label>Infill (%)<input id="slicerInfill" type="number" step="1" min="0" max="100" value="20"></label>
-            <label>Travel Z lift (mm)<input id="slicerTravelLift" type="number" step="0.1" min="0" max="10" value="1.0"></label>
-            <label>Print speed (mm/min)<input id="slicerPrintFeed" type="number" step="10" min="30" max="3000" value="240"></label>
-            <label>Travel speed (mm/min)<input id="slicerTravelFeed" type="number" step="10" min="60" max="6000" value="1200"></label>
-          </div>
-
-          <p class="eyebrow">Hardware calibration gate</p>
-          <div class="checklist">
-            <label><input id="slicerMotorDirectionVerified" type="checkbox"> Syringe motor direction has been physically verified</label>
-            <label><input id="slicerEstepsCalibrated" type="checkbox"> Syringe E-steps have been experimentally calibrated</label>
-          </div>
-
-          <p id="slicerMessage" class="muted">Choose an STL. Planning and G-code generation do not execute the printer.</p>
-
-          <div class="grid two">
-            <div>
-              <p class="eyebrow">Slice summary</p>
-              <div id="slicerSummary" class="detail-list"></div>
-            </div>
-            <div>
-              <div class="card-title">
-                <div>
-                  <p class="eyebrow">Physical print preflight</p>
-                  <h3 id="slicerPreflightTitle">Not evaluated</h3>
-                </div>
-                <span id="slicerPreflightBadge" class="pill">WAITING</span>
-              </div>
-              <div id="slicerPreflight" class="detail-list"></div>
-              <div id="slicerAdvisories" class="detail-list"></div>
-            </div>
-          </div>
-
-          <div class="jog-toolbar">
-            <label>Preview layer
-              <input id="slicerLayerPreview" type="range" min="0" max="0" value="0" step="1" disabled>
-            </label>
-            <span id="slicerLayerPreviewLabel" class="muted">All layers</span>
-            <label><input id="slicerShowAllLayers" type="checkbox" checked> Show all layers</label>
-          </div>
-          <div class="slicer-preview-wrap">
-            <canvas id="slicerPreview" width="720" height="420" aria-label="2D preview of syringe-sliced toolpaths"></canvas>
-          </div>
-          <p class="muted">This planner intentionally does not generate ordinary FDM-style removable supports from the same alginate syringe. Unsupported geometry is measured and must be addressed with self-supporting design, a support bath, or a separate/manual scaffold strategy.</p>
-        </article>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Enderstruder mechanics</p>
-              <h3>Syringe motor calculator</h3>
-            </div>
-            <span class="pill">THEORETICAL</span>
-          </div>
-          <p>Convert a requested syringe volume into plunger travel, motor revolutions, microsteps, and Marlin E motion. Defaults match the 10 mL BD / 4:1 / M8×1.25 Enderstruder configuration.</p>
-          <div class="calibration-form">
-            <label>Syringe inner diameter (mm)<input id="syringeDiameter" type="number" step="0.01" min="1" value="14.5"></label>
-            <label>Gear ratio motor:lead screw<input id="syringeGearRatio" type="number" step="0.1" min="0.1" value="4"></label>
-            <label>Lead screw pitch (mm/rev)<input id="syringeLeadPitch" type="number" step="0.01" min="0.01" value="1.25"></label>
-            <label>Motor full steps/rev<input id="syringeMotorSteps" type="number" step="1" min="1" value="200"></label>
-            <label>Microsteps<input id="syringeMicrosteps" type="number" step="1" min="1" value="16"></label>
-            <label>Requested volume (mL)<input id="syringeVolume" type="number" step="0.01" min="0" value="0.10"></label>
-            <label>Optional print path length (mm)<input id="syringePathLength" type="number" step="0.1" min="0" value="40"></label>
-          </div>
-          <div class="locked-controls">
-            <button id="calculateSyringeMotion" class="primary">Calculate syringe motion</button>
-          </div>
-          <div id="syringeMotionResults" class="detail-list"></div>
-          <p class="muted">The theoretical E-steps/mm must still be experimentally calibrated before printing. The E value here represents plunger travel in millimeters when Marlin is configured to that calibrated E-steps/mm.</p>
-        </article>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Vision comparison</p>
-              <h3>Expected path overlay</h3>
-            </div>
-            <span class="pill">OBSERVE ONLY</span>
-          </div>
-          <p>When both a calibration profile and a G-code plan are loaded, the Monitor page projects the expected extrusion path into the D405 image. This establishes the expected-vs-observed framework without commanding the printer.</p>
-          <div class="locked-controls">
-            <button class="secondary nav-jump" data-target="monitor">Open calibrated monitor</button>
-          </div>
-        </article>
-      </section>
-
-      <section id="page-experiments" class="page">
-        <div class="grid two">
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Research data collection</p>
-                <h3>Experiment session</h3>
-              </div>
-              <span id="experimentBadge" class="pill">IDLE</span>
-            </div>
-            <label class="stacked-label">Experiment name
-              <input id="experimentName" type="text" value="Bioprinter experiment" maxlength="128">
-            </label>
-            <div class="locked-controls">
-              <button id="startExperiment" class="primary">Start experiment</button>
-              <button id="captureExperimentSnapshot" class="secondary" disabled>Capture RGB + depth snapshot</button>
-              <button id="stopExperiment" class="danger-outline" disabled>Stop experiment</button>
-            </div>
-            <p id="experimentMessage" class="muted">Experiments run in OBSERVE mode and do not command the printer.</p>
-          </article>
-
-          <article class="card">
-            <p class="eyebrow">Active session</p>
-            <h3>Metadata</h3>
-            <div id="experimentDetails" class="detail-list"></div>
-          </article>
-        </div>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Saved research runs</p>
-              <h3>Recent experiments</h3>
-            </div>
-            <button id="refreshExperiments" class="secondary">Refresh</button>
-          </div>
-          <div id="recentExperiments" class="experiment-list"></div>
-        </article>
-      </section>
-
-      <section id="page-analytics" class="page">
-        <div class="status-banner">
-          <div>
-            <span class="status-label">QUALITY ANALYSIS</span>
-            <h2>Expected vs observed surface</h2>
-            <p>Observe-only comparison of D405 deposition height against the loaded G-code geometry.</p>
-          </div>
-          <div id="qualityReadinessBadge" class="pill">CHECKING</div>
-        </div>
-
-        <div class="grid two">
-          <article class="card">
-            <p class="eyebrow">Analysis settings</p>
-            <h3>Final surface comparison</h3>
-            <div class="calibration-form">
-              <label>Path radius (mm)<input id="qualityPathRadius" type="number" step="0.1" min="0.1" value="2.0"></label>
-              <label>Minimum deposition height (mm)<input id="qualityMinHeight" type="number" step="0.05" min="0" value="0.10"></label>
-              <label>Height tolerance ± (mm)<input id="qualityHeightTolerance" type="number" step="0.05" min="0.05" value="0.50"></label>
-              <label>Grid<input value="14 × 10 samples" disabled></label>
-            </div>
-            <div class="locked-controls">
-              <button id="runQualityAnalysis" class="primary" disabled>Run quality scan</button>
-            </div>
-            <p id="qualityMessage" class="muted">Requires camera calibration, a saved reference surface, and loaded G-code.</p>
-          </article>
-
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Quality metrics</p>
-                <h3>Latest analysis</h3>
-              </div>
-              <span id="qualityAdvisoryBadge" class="pill">NO DATA</span>
-            </div>
-            <div class="sensor-grid">
-              <div><span>Path coverage</span><strong id="qualityCoverage">—</strong></div>
-              <div><span>Within tolerance</span><strong id="qualityToleranceRate">—</strong></div>
-              <div><span>Missing samples</span><strong id="qualityMissing">—</strong></div>
-              <div><span>Excess samples</span><strong id="qualityExcess">—</strong></div>
-              <div><span>Mean |height error|</span><strong id="qualityMeanAbs">—</strong></div>
-              <div><span>RMS height error</span><strong id="qualityRms">—</strong></div>
-            </div>
-            <p id="qualityAdvisoryReasons" class="muted"></p>
-          </article>
-        </div>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Spatial quality map</p>
-              <h3>D405 final-surface analysis</h3>
-            </div>
-            <span class="pill">OBSERVE ONLY</span>
-          </div>
-          <div class="quality-legend">
-            <span><i class="q-ok"></i> Within tolerance</span>
-            <span><i class="q-low"></i> Too low</span>
-            <span><i class="q-high"></i> Too high</span>
-            <span><i class="q-missing"></i> Missing</span>
-            <span><i class="q-excess"></i> Excess/off-path</span>
-          </div>
-          <div class="camera-stage calibration-stage" id="qualityStage">
-            <img id="qualityImage" alt="D405 quality analysis frame" />
-            <canvas id="qualityCanvas"></canvas>
-            <div id="qualityPlaceholder">Run a quality scan to generate a spatial map.</div>
-          </div>
-          <p class="muted">G-code Z is currently used as an expected-height proxy. These metrics must be validated against physical measurements for the specific bioink and process before any automatic printer decision uses them.</p>
-        </article>
-      </section>
-
-      <section id="page-network" class="page">
-        <div class="grid two">
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Current connection</p>
-                <h3 id="currentSsid">—</h3>
-              </div>
-              <span id="wifiBadge" class="pill">CHECKING</span>
-            </div>
-            <div class="detail-list">
-              <div><span>IP address</span><strong id="currentIp">—</strong></div>
-              <div><span>Signal</span><strong id="currentSignal">—</strong></div>
-              <div><span>Security</span><strong id="currentSecurity">—</strong></div>
-            </div>
-            <div class="notice">Changing Wi-Fi can temporarily disconnect this page while the Pi joins the new network.</div>
-          </article>
-
-          <article class="card">
-            <div class="card-title">
-              <div>
-                <p class="eyebrow">Saved profiles</p>
-                <h3>Known networks & fallback order</h3>
-              </div>
-            </div>
-            <p class="muted">Higher priority networks are preferred. If one is unavailable, NetworkManager can automatically try the next saved profile.</p>
-            <div id="savedNetworks" class="saved-list"></div>
-          </article>
-        </div>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Internet access</p>
-              <h3>Remote controller website</h3>
-            </div>
-            <span id="remoteAccessBadge" class="pill">CHECKING</span>
-          </div>
-          <div class="detail-list">
-            <div><span>Public URL</span><strong id="remoteAccessUrl">Not configured</strong></div>
-            <div><span>Tunnel service</span><strong id="remoteAccessService">cloudflared.service</strong></div>
-            <div><span>Connection model</span><strong>Pi → outbound tunnel → website</strong></div>
-          </div>
-          <div class="notice">The printer web app can be reached through a stable HTTPS hostname without opening port 8080 on the router. Keep the existing controller access key, and protect the public hostname with an identity/access policy as an additional layer.</div>
-          <p id="remoteAccessMessage" class="muted">One-time tunnel setup is required before this becomes active.</p>
-        </article>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Direct access</p>
-              <h3>Setup hotspot</h3>
-            </div>
-            <span id="hotspotBadge" class="pill">CHECKING</span>
-          </div>
-          <div class="detail-list">
-            <div><span>Wi-Fi name</span><strong id="hotspotSsid">VT-Bioprinter-Setup</strong></div>
-            <div><span>Wi-Fi password</span><strong id="hotspotPassword">bioprinter</strong></div>
-            <div><span>Controller address</span><strong id="hotspotUrl">http://10.42.0.1:8080</strong></div>
-          </div>
-          <div class="notice">If the Pi cannot join normal Wi-Fi after boot, it automatically starts this network.</div>
-          <div class="locked-controls">
-            <button id="hotspotOn" class="secondary">Start setup hotspot</button>
-          </div>
-          <p id="hotspotMessage" class="muted"></p>
-        </article>
-
-        <article class="card">
-          <div class="card-title">
-            <div>
-              <p class="eyebrow">Wi-Fi</p>
-              <h3>Available networks</h3>
-            </div>
-            <button id="scanWifi" class="secondary">Scan</button>
-          </div>
-          <div class="manual-network">
-            <input id="manualSsid" type="text" placeholder="Network name (SSID)" />
-            <button id="manualConnect" class="secondary">Connect to other network</button>
-          </div>
-          <div id="wifiList" class="wifi-list">
-            <p class="muted">Press Scan to search for nearby Wi-Fi networks, or enter the SSID manually.</p>
+          <p class="muted">The alginate STL slicer, preflight checks, layer preview, syringe calculations, and G-code workflow remain on the Raspberry Pi and will be exposed here through the secure device bridge.</p>
+          <div class="feature-grid">
+            <div><strong>STL slicing</strong><span>Ready on Pi</span></div>
+            <div><strong>Alginate profile</strong><span>Ready on Pi</span></div>
+            <div><strong>Layer preview</strong><span>Ready on Pi</span></div>
+            <div><strong>Print preflight</strong><span>Ready on Pi</span></div>
           </div>
         </article>
       </section>
@@ -845,34 +216,25 @@
       <section id="page-system" class="page">
         <div class="grid two">
           <article class="card">
-            <p class="eyebrow">Raspberry Pi</p>
-            <h3>System information</h3>
-            <div id="systemDetails" class="detail-list"></div>
+            <p class="eyebrow">Cloud</p>
+            <h3>Deployment status</h3>
+            <div class="detail-list">
+              <div><span>Provider</span><strong>Vercel</strong></div>
+              <div><span>API</span><strong id="systemApiState">Checking…</strong></div>
+              <div><span>Device bridge</span><strong id="systemDeviceState">Not paired</strong></div>
+            </div>
           </article>
           <article class="card">
-            <p class="eyebrow">Access</p>
-            <h3>Controller security</h3>
-            <p>The public dashboard proxies approved commands to the Raspberry Pi. Wi-Fi configuration remains local-only and the Pi controller port must not be exposed directly.</p>
-            <button id="forgetToken" class="danger-outline">Forget browser access key</button>
+            <p class="eyebrow">Local fallback</p>
+            <h3>Raspberry Pi interface</h3>
+            <p class="muted">Wi-Fi setup and recovery stay local to avoid remotely disconnecting the controller.</p>
+            <code>http://vt-3dprinter.local:8080</code>
           </article>
         </div>
       </section>
     </main>
   </div>
 
-  <dialog id="wifiDialog">
-    <form id="wifiForm" method="dialog">
-      <p class="eyebrow">Connect to network</p>
-      <h3 id="dialogSsid">Wi-Fi</h3>
-      <input id="wifiPassword" type="password" autocomplete="new-password" placeholder="Wi-Fi password (leave blank for open network)" />
-      <div class="dialog-actions">
-        <button type="button" id="cancelWifi" class="ghost">Cancel</button>
-        <button type="submit" class="primary">Connect</button>
-      </div>
-      <p id="wifiDialogMessage" class="muted"></p>
-    </form>
-  </dialog>
-
-  <script src="/assets/app.js?v=cloud2"></script>
+  <script src="/assets/app.js?v=cloud3"></script>
 </body>
 </html>

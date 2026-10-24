@@ -20,6 +20,9 @@ DEFAULT_ALGINATE_PROFILE: dict[str, Any] = {
     "perimeter_count": 1,
     "extrusion_multiplier": 1.0,
     "travel_lift_mm": 1.0,
+    "temperature_mode": "ambient",
+    "bed_temperature_c": 0.0,
+    "hotend_temperature_c": 0.0,
     "support_strategy": "self_supporting",
 }
 
@@ -61,6 +64,9 @@ def process_advisories(profile: dict[str, Any]) -> list[dict[str, str]]:
     speed = float(profile.get("print_speed_mm_s", 0.0) or 0.0)
     support = str(profile.get("support_strategy", "self_supporting"))
     crosslink = str(profile.get("crosslink_mode", "post_print"))
+    temperature_mode = str(profile.get("temperature_mode", "ambient"))
+    bed_temperature_c = float(profile.get("bed_temperature_c", 0.0) or 0.0)
+    hotend_temperature_c = float(profile.get("hotend_temperature_c", 0.0) or 0.0)
 
     if not (0.5 <= alginate <= 8.0):
         advisories.append({
@@ -97,6 +103,24 @@ def process_advisories(profile: dict[str, Any]) -> list[dict[str, str]]:
             "level": "error",
             "code": "crosslink_mode",
             "message": "Unknown crosslinking mode.",
+        })
+    if temperature_mode not in {"ambient", "heated_bed"}:
+        advisories.append({
+            "level": "error",
+            "code": "temperature_mode",
+            "message": "Unknown temperature mode.",
+        })
+    if hotend_temperature_c > 0:
+        advisories.append({
+            "level": "error",
+            "code": "hotend_heating_disabled",
+            "message": "Stock hotend heating is disabled for the syringe workflow. Use dedicated, validated syringe/nozzle temperature hardware before enabling material heating.",
+        })
+    if temperature_mode == "heated_bed" and not (15.0 <= bed_temperature_c <= 60.0):
+        advisories.append({
+            "level": "warning",
+            "code": "bed_temperature",
+            "message": "Requested bed temperature is outside the conservative 15–60 °C research planning range.",
         })
 
     return advisories

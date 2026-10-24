@@ -610,6 +610,35 @@
         <article class="card">
           <div class="card-title">
             <div>
+              <p class="eyebrow">Physical execution</p>
+              <h3>Print runner + D405 supervision</h3>
+            </div>
+            <span id="printRunnerBadge" class="pill">IDLE</span>
+          </div>
+          <p>Streams the active VT-sliced G-code to Marlin one command at a time. Physical execution remains blocked until the slicer preflight passes.</p>
+          <div class="checklist">
+            <label><input id="confirmPhysicalStop" type="checkbox"> Physical power cutoff is immediately reachable</label>
+          </div>
+          <div class="locked-controls">
+            <button id="startPhysicalPrint" class="primary" disabled>Start Print</button>
+            <button id="pausePhysicalPrint" class="secondary" disabled>Pause</button>
+            <button id="resumePhysicalPrint" class="secondary" disabled>Resume</button>
+            <button id="stopPhysicalPrint" class="danger-outline" disabled>Stop sending</button>
+          </div>
+          <div class="sensor-grid">
+            <div><span>Progress</span><strong id="printProgress">0%</strong></div>
+            <div><span>Layer</span><strong id="printLayer">—</strong></div>
+            <div><span>Commands</span><strong id="printCommands">0 / 0</strong></div>
+            <div><span>D405 monitor</span><strong id="printVisionStatus">NOT STARTED</strong></div>
+          </div>
+          <div id="printVisionDetails" class="detail-list"></div>
+          <p id="printRunnerMessage" class="muted">Slice a model and resolve every physical preflight block before starting.</p>
+          <p class="muted">“Stop sending” stops future G-code after the current command/queued motion. Use the existing Emergency Stop / physical power cutoff for an immediate stop.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
               <p class="eyebrow">Enderstruder mechanics</p>
               <h3>Syringe motor calculator</h3>
             </div>

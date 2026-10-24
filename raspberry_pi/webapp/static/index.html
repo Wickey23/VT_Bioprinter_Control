@@ -622,6 +622,7 @@
             <label><input id="confirmSurfaceClean" type="checkbox"> Print surface is clean and ready for a fresh D405 baseline</label>
           </div>
           <div class="locked-controls">
+            <button id="startDryRun" class="secondary" disabled>Motion-Only Dry Run</button>
             <button id="startPhysicalPrint" class="primary" disabled>Calibrate & Start Print</button>
             <button id="pausePhysicalPrint" class="secondary" disabled>Pause</button>
             <button id="resumePhysicalPrint" class="secondary" disabled>Resume</button>
@@ -639,7 +640,7 @@
             <img id="printCameraImage" alt="D405 live print view">
             <div id="printCameraPlaceholder">D405 live view will start with the print.</div>
           </div>
-          <p id="printRunnerMessage" class="muted">Slice a model and resolve every physical preflight block before starting.</p>
+          <p id="printRunnerMessage" class="muted">Use Motion-Only Dry Run to verify actual XYZ motion immediately with extrusion removed. Full printing still requires calibration.</p>
           <p class="muted">“Stop sending” stops future G-code after the current command/queued motion. Use the existing Emergency Stop / physical power cutoff for an immediate stop.</p>
         </article>
 

@@ -439,6 +439,8 @@ def slice_stl_to_syringe_gcode(
     calcium_chloride_mM: float = 80.0,
     crosslink_mode: str = "post_print",
     support_strategy: str = "self_supporting",
+    temperature_mode: str = "ambient",
+    bed_temperature_c: float = 0.0,
     syringe_capacity_ml: float = 10.0,
     extrusion_multiplier: float = 1.0,
     travel_lift_mm: float = 1.0,
@@ -469,6 +471,10 @@ def slice_stl_to_syringe_gcode(
         raise ValueError("Unsupported support strategy.")
     if crosslink_mode not in {"post_print", "support_bath", "manual"}:
         raise ValueError("Unsupported crosslinking mode.")
+    if temperature_mode not in {"ambient", "heated_bed"}:
+        raise ValueError("Unsupported temperature mode.")
+    if not (0.0 <= bed_temperature_c <= 60.0):
+        raise ValueError("Bed temperature must be between 0 and 60 °C.")
 
     triangles = _parse_stl_triangles(stl_data)
     if triangles.shape[0] > 300_000:
@@ -514,6 +520,9 @@ def slice_stl_to_syringe_gcode(
         "travel_speed_mm_s": float(travel_feed_mm_min) / 60.0,
         "extrusion_multiplier": float(extrusion_multiplier),
         "travel_lift_mm": float(travel_lift_mm),
+        "temperature_mode": temperature_mode,
+        "bed_temperature_c": float(bed_temperature_c),
+        "hotend_temperature_c": 0.0,
     }
     advisories = process_advisories(profile)
 
@@ -541,6 +550,9 @@ def slice_stl_to_syringe_gcode(
         f"; calcium_chloride_mM={calcium_chloride_mM:.3f}",
         f"; crosslink_mode={crosslink_mode}",
         f"; support_strategy={support_strategy}",
+        f"; temperature_mode={temperature_mode}",
+        f"; bed_temperature_c={bed_temperature_c:.1f}",
+        f"; hotend_temperature_c=0.0",
         f"; needle_inner_diameter_mm={needle_inner_diameter_mm:.4f}",
         f"; layer_height_mm={layer_height_mm:.4f}",
         f"; bead_width_mm={bead_width_mm:.4f}",
@@ -551,6 +563,9 @@ def slice_stl_to_syringe_gcode(
         f"; e_per_xy_mm={e_per_path_mm:.9f}",
         "G90",
         "M83",
+        "M104 S0",
+        ("M140 S0" if temperature_mode == "ambient" else f"M140 S{bed_temperature_c:.1f}"),
+        ("M140 S0" if temperature_mode == "ambient" else f"M190 S{bed_temperature_c:.1f}"),
         "M302 S0",
         "G28",
         "M400",
@@ -721,6 +736,9 @@ def slice_stl_to_syringe_gcode(
         "unsupported_path_ratio": round(unsupported_ratio, 6),
         "support_strategy": support_strategy,
         "crosslink_mode": crosslink_mode,
+        "temperature_mode": temperature_mode,
+        "bed_temperature_c": round(float(bed_temperature_c), 2),
+        "hotend_temperature_c": 0.0,
         "layer_summaries": layer_summaries,
         "preflight": preflight,
     }

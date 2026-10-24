@@ -14,6 +14,8 @@ from webapp import calibration
 from webapp import print_plan
 from webapp import quality
 from webapp import vision
+from webapp import failure_detection
+from webapp import print_runner
 
 
 def assert_close(actual: float, expected: float, tol: float, label: str) -> None:
@@ -222,6 +224,60 @@ def test_bioprint_preflight() -> None:
         raise AssertionError("Expected calibrated support-bath plan to pass preflight")
 
 
+def test_explicit_layer_parser() -> None:
+    sample = """G90
+M83
+;LAYER:0
+G0 Z0.3
+G0 Z1.3
+G0 X10 Y10
+G0 Z0.3
+G1 X20 Y10 E0.01 F240
+;LAYER:1
+G0 Z0.6
+G0 Z1.6
+G0 X10 Y20
+G0 Z0.6
+G1 X20 Y20 E0.01 F240
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        original = print_plan.ACTIVE_PLAN
+        try:
+            print_plan.ACTIVE_PLAN = Path(tmp) / "active.json"
+            plan = print_plan.parse_gcode(sample, "layer-test.gcode")
+        finally:
+            print_plan.ACTIVE_PLAN = original
+    if plan["layer_count_estimate"] != 2:
+        raise AssertionError(f"Expected 2 explicit layers, got {plan['layer_count_estimate']}")
+
+
+def test_failure_classifier() -> None:
+    result = {
+        "advisory_status": "FAULT",
+        "missing_path_samples": 3,
+        "excess_off_path_samples": 0,
+        "coverage_percent": 70.0,
+        "within_tolerance_percent": 65.0,
+        "mean_height_error_mm": -0.2,
+        "rms_height_error_mm": 0.3,
+    }
+    assessment = failure_detection.classify_quality(result)
+    if assessment["failure_type"] != "MISSING_OR_UNDER_EXTRUSION":
+        raise AssertionError("Expected missing/under-extrusion classification")
+
+
+def test_print_runner_allowlist() -> None:
+    runner = print_runner.PrintRunner()
+    if runner._count_commands("G90\nM83\nG1 X1 Y1 E0.01 F240\nM400\n") != 4:
+        raise AssertionError("Expected allowed print commands to be counted")
+    try:
+        runner._count_commands("M500\n")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Firmware/EEPROM command M500 must be blocked by print runner")
+
+
 def test_projection_math() -> None:
     profile = {
         "camera": {
@@ -323,6 +379,9 @@ def main() -> int:
         ("G-code parser", test_gcode_parser),
         ("syringe STL slicer", test_syringe_stl_slicer),
         ("bioprint preflight", test_bioprint_preflight),
+        ("explicit layer parser", test_explicit_layer_parser),
+        ("failure classifier", test_failure_classifier),
+        ("print runner allowlist", test_print_runner_allowlist),
         ("projection math", test_projection_math),
         ("quality engine", test_quality_engine),
         ("vision tracker", test_vision_tracker),

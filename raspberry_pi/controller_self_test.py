@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
+from webapp import bioprint
 from webapp import calibration
 from webapp import print_plan
 from webapp import quality
@@ -178,6 +179,47 @@ endsolid box
         raise AssertionError("Expected positive syringe plunger travel")
     if " E" not in result["gcode"]:
         raise AssertionError("Expected syringe E moves in generated G-code")
+    if "preflight" not in summary:
+        raise AssertionError("Expected slicer preflight metadata")
+    if summary["preflight"]["ready_for_physical_print"]:
+        raise AssertionError("Default uncalibrated slicer plan should be blocked from physical printing")
+
+
+def test_bioprint_preflight() -> None:
+    ratio = bioprint.e_per_path_mm(
+        bead_width_mm=0.8,
+        layer_height_mm=0.3,
+        syringe_inner_diameter_mm=14.5,
+        extrusion_multiplier=1.0,
+    )
+    if ratio <= 0:
+        raise AssertionError("Expected positive syringe E/path ratio")
+
+    blocked = bioprint.build_preflight(
+        model_size_mm=[20.0, 20.0, 3.0],
+        bounds_mm={"min": [100.0, 100.0, 0.3], "max": [120.0, 120.0, 3.0]},
+        estimated_volume_ml=0.5,
+        syringe_capacity_ml=10.0,
+        unsupported_ratio=0.15,
+        support_strategy="self_supporting",
+        e_steps_calibrated=False,
+        motor_direction_verified=False,
+    )
+    if blocked["ready_for_physical_print"]:
+        raise AssertionError("Expected uncalibrated unsupported print to be blocked")
+
+    ready = bioprint.build_preflight(
+        model_size_mm=[20.0, 20.0, 3.0],
+        bounds_mm={"min": [100.0, 100.0, 0.3], "max": [120.0, 120.0, 3.0]},
+        estimated_volume_ml=0.5,
+        syringe_capacity_ml=10.0,
+        unsupported_ratio=0.15,
+        support_strategy="support_bath",
+        e_steps_calibrated=True,
+        motor_direction_verified=True,
+    )
+    if not ready["ready_for_physical_print"]:
+        raise AssertionError("Expected calibrated support-bath plan to pass preflight")
 
 
 def test_projection_math() -> None:
@@ -280,6 +322,7 @@ def main() -> int:
         ("rigid transform", test_rigid_transform),
         ("G-code parser", test_gcode_parser),
         ("syringe STL slicer", test_syringe_stl_slicer),
+        ("bioprint preflight", test_bioprint_preflight),
         ("projection math", test_projection_math),
         ("quality engine", test_quality_engine),
         ("vision tracker", test_vision_tracker),

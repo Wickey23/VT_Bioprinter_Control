@@ -25,7 +25,9 @@ const state={
   qualityResult:null,
   qualityObjectUrl:null,
   slicedGcode:null,
-  slicedFilename:null
+  slicedFilename:null,
+  slicerPreflightReady:false,
+  printState:null
 };
 
 async function api(path,opts={}){
@@ -1154,6 +1156,7 @@ function renderSlicerPreflight(preflight, advisories=[]){
   }
 
   const ready=!!preflight.ready_for_physical_print;
+  state.slicerPreflightReady=ready;
   badge.textContent=ready?"READY":"BLOCKED";
   badge.className="pill "+(ready?"ok":"bad");
   title.textContent=ready?"Ready for physical print":"Resolve blocking checks";
@@ -1268,13 +1271,16 @@ async function sliceStlForSyringe(){
     renderSlicerPreflight(d.preflight||s.preflight,d.advisories||s.process_advisories||[]);
     $("downloadSlicedGcode").disabled=false;
     $("slicerMessage").textContent=(d.preflight?.ready_for_physical_print
-      ?"Plan complete and preflight passed. G-code is generated but still not auto-executed."
+      ?"Plan complete and preflight passed. The physical print runner is ready after you confirm the power cutoff."
       :"Plan complete. G-code is generated for preview, but physical printing is blocked by preflight items.");
+    updatePrintStartReadiness();
   }catch(err){
     state.slicedGcode=null;
     state.slicedFilename=null;
     $("slicerSummary").innerHTML="";
     renderSlicerPreflight(null,[]);
+    state.slicerPreflightReady=false;
+    updatePrintStartReadiness();
     drawSlicerPreview(null);
     $("slicerMessage").textContent="Slice failed: "+err.message;
   }finally{
@@ -1293,6 +1299,92 @@ function downloadSlicedGcode(){
   a.click();
   a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+function updatePrintStartReadiness(){
+  const running=!!state.printState?.running;
+  const confirmed=!!$("confirmPhysicalStop")?.checked;
+  $("startPhysicalPrint").disabled=running||!state.slicerPreflightReady||!confirmed;
+}
+
+function renderPrintRunner(p){
+  state.printState=p||null;
+  if(!p)return;
+  const running=!!p.running;
+  const paused=!!p.paused;
+  const stateName=p.state||"IDLE";
+  const ok=["IDLE","PRINTING","STARTING","PAUSED","COMPLETE"].includes(stateName);
+  pill($("printRunnerBadge"),ok,stateName);
+  $("printProgress").textContent=Number(p.progress_percent||0).toFixed(1)+"%";
+  $("printLayer").textContent=p.current_layer==null?"—":String(Number(p.current_layer)+1);
+  $("printCommands").textContent=Number(p.completed_commands||0)+" / "+Number(p.total_commands||0);
+
+  $("pausePhysicalPrint").disabled=!running||paused;
+  $("resumePhysicalPrint").disabled=!running||!paused;
+  $("stopPhysicalPrint").disabled=!running;
+  updatePrintStartReadiness();
+
+  const monitor=p.monitoring||{};
+  $("printVisionStatus").textContent=monitor.status||"NOT STARTED";
+  const metrics=monitor.metrics||{};
+  const rows=[];
+  if(monitor.failure_type)rows.push(["Detected condition",monitor.failure_type]);
+  if(metrics.coverage_percent!=null)rows.push(["Path coverage",Number(metrics.coverage_percent).toFixed(1)+"%"]);
+  if(metrics.within_tolerance_percent!=null)rows.push(["Within tolerance",Number(metrics.within_tolerance_percent).toFixed(1)+"%"]);
+  if(metrics.missing_path_samples!=null)rows.push(["Missing samples",metrics.missing_path_samples]);
+  if(metrics.excess_off_path_samples!=null)rows.push(["Off-path samples",metrics.excess_off_path_samples]);
+  $("printVisionDetails").innerHTML=rows.map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+
+  if(p.error){
+    $("printRunnerMessage").textContent="Print error: "+p.error;
+  }else if(monitor.message&&monitor.last_checked_layer!=null){
+    $("printRunnerMessage").textContent="Layer "+(Number(monitor.last_checked_layer)+1)+": "+monitor.message;
+  }else if(stateName==="COMPLETE"){
+    $("printRunnerMessage").textContent="Print completed. Run final quality analysis for the full surface.";
+  }else if(stateName==="STOPPED"){
+    $("printRunnerMessage").textContent="Stopped sending new G-code. Buffered printer motion may finish; use Emergency Stop or physical power for an immediate stop.";
+  }else if(running){
+    $("printRunnerMessage").textContent="Printing "+(p.filename||"plan")+" · "+Number(p.progress_percent||0).toFixed(1)+"% complete.";
+  }
+}
+
+async function loadPrintRunner(){
+  const p=await api("/api/print/status");
+  renderPrintRunner(p);
+  return p;
+}
+
+async function startPhysicalPrint(){
+  if(!$("confirmPhysicalStop").checked){
+    $("printRunnerMessage").textContent="Confirm that the physical power cutoff is immediately reachable.";
+    return;
+  }
+  if(!confirm("Start the loaded bioprint now? The printer will physically home/move/extrude according to the loaded G-code. Keep the physical power cutoff within reach."))return;
+  $("printRunnerMessage").textContent="Starting physical print…";
+  try{
+    const p=await api("/api/print/start",{
+      method:"POST",
+      body:JSON.stringify({confirm_physical_stop_available:true})
+    });
+    renderPrintRunner(p);
+  }catch(err){
+    $("printRunnerMessage").textContent="Start blocked: "+err.message;
+    await loadPrintRunner().catch(()=>{});
+  }
+}
+
+async function pausePhysicalPrint(){
+  try{renderPrintRunner(await api("/api/print/pause",{method:"POST"}))}
+  catch(err){$("printRunnerMessage").textContent=err.message}
+}
+async function resumePhysicalPrint(){
+  try{renderPrintRunner(await api("/api/print/resume",{method:"POST"}))}
+  catch(err){$("printRunnerMessage").textContent=err.message}
+}
+async function stopPhysicalPrint(){
+  if(!confirm("Stop sending new G-code after the current command? This is not an emergency stop."))return;
+  try{renderPrintRunner(await api("/api/print/stop",{method:"POST"}))}
+  catch(err){$("printRunnerMessage").textContent=err.message}
 }
 
 function renderPlan(plan){
@@ -1752,7 +1844,7 @@ function activatePage(page){
   if(page==="monitor"){
     Promise.allSettled([loadCalibration(),loadPlan()]).then(()=>loadProjectedPlan().catch(()=>{}));
   }
-  if(page==="print"){loadPlan().catch(()=>{})}
+  if(page==="print"){loadPlan().catch(()=>{});loadPrintRunner().catch(()=>{})}
   if(page==="experiments"){loadExperiments().catch(()=>{})}
   if(page==="analytics"){
     Promise.allSettled([loadCalibration(),loadPlan()]).then(()=>{
@@ -1814,6 +1906,11 @@ $("loadGcode").onclick=()=>loadGcodeFile();
 $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
 $("sliceStl").onclick=()=>sliceStlForSyringe();
 $("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
+$("confirmPhysicalStop").onchange=()=>updatePrintStartReadiness();
+$("startPhysicalPrint").onclick=()=>startPhysicalPrint();
+$("pausePhysicalPrint").onclick=()=>pausePhysicalPrint();
+$("resumePhysicalPrint").onclick=()=>resumePhysicalPrint();
+$("stopPhysicalPrint").onclick=()=>stopPhysicalPrint();
 $("slicerLayerPreview").oninput=()=>drawSlicerPreview(state.planSummary);
 $("slicerShowAllLayers").onchange=()=>drawSlicerPreview(state.planSummary);
 $("slicerTemperatureMode").onchange=()=>{
@@ -1899,6 +1996,7 @@ $("loginForm").onsubmit=async e=>{
   calculateSyringeMotion();
   drawSlicerPreview(state.planSummary);
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);
+  setInterval(()=>{if(state.token)loadPrintRunner().catch(()=>{})},1500);
 })();
 
 

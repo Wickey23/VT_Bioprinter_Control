@@ -10,6 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from webapp.bioprint import build_preflight, e_per_path_mm as syringe_e_per_path_mm, process_advisories
+
 CONFIG_DIR = Path(
     os.environ.get(
         "VT_BIOPRINTER_CONFIG_DIR",
@@ -368,6 +370,58 @@ def _hatch_segments(
     return result
 
 
+
+def _point_in_closed_path(point: np.ndarray, path: list[np.ndarray]) -> bool:
+    if len(path) < 3:
+        return False
+    x, y = float(point[0]), float(point[1])
+    inside = False
+    pts = path if float(np.linalg.norm(path[-1] - path[0])) <= 0.1 else path + [path[0]]
+    for i in range(len(pts) - 1):
+        x1, y1 = float(pts[i][0]), float(pts[i][1])
+        x2, y2 = float(pts[i + 1][0]), float(pts[i + 1][1])
+        if (y1 > y) == (y2 > y):
+            continue
+        denom = y2 - y1
+        if abs(denom) < 1e-12:
+            continue
+        x_cross = x1 + (y - y1) * (x2 - x1) / denom
+        if x < x_cross:
+            inside = not inside
+    return inside
+
+
+def _point_in_paths(point: np.ndarray, paths: list[list[np.ndarray]]) -> bool:
+    # Even/odd fill rule supports nested loops and holes reasonably well.
+    return sum(1 for path in paths if _point_in_closed_path(point, path)) % 2 == 1
+
+
+def _estimate_unsupported_ratio(
+    previous_paths: list[list[np.ndarray]],
+    current_paths: list[list[np.ndarray]],
+) -> float:
+    if not current_paths:
+        return 0.0
+    if not previous_paths:
+        return 0.0
+
+    total = 0
+    unsupported = 0
+    for path in current_paths:
+        if len(path) < 2:
+            continue
+        for a, b in zip(path[:-1], path[1:]):
+            length = float(np.linalg.norm(b - a))
+            samples = max(1, min(8, int(math.ceil(length / 2.0))))
+            for j in range(samples):
+                t = (j + 0.5) / samples
+                p = a + t * (b - a)
+                total += 1
+                if not _point_in_paths(p, previous_paths):
+                    unsupported += 1
+    return unsupported / total if total else 0.0
+
+
 def slice_stl_to_syringe_gcode(
     stl_data: bytes,
     *,
@@ -376,10 +430,20 @@ def slice_stl_to_syringe_gcode(
     bead_width_mm: float = 0.8,
     infill_percent: float = 20.0,
     syringe_diameter_mm: float = 14.5,
-    print_feed_mm_min: int = 300,
+    needle_inner_diameter_mm: float = 0.60,
+    alginate_percent_wv: float = 3.0,
+    calcium_chloride_mM: float = 80.0,
+    crosslink_mode: str = "post_print",
+    support_strategy: str = "self_supporting",
+    syringe_capacity_ml: float = 10.0,
+    extrusion_multiplier: float = 1.0,
+    travel_lift_mm: float = 1.0,
+    print_feed_mm_min: int = 240,
     travel_feed_mm_min: int = 1200,
     bed_center_x_mm: float = 110.0,
     bed_center_y_mm: float = 110.0,
+    e_steps_calibrated: bool = False,
+    motor_direction_verified: bool = False,
 ) -> dict[str, Any]:
     if not (0.05 <= layer_height_mm <= 5.0):
         raise ValueError("Layer height must be between 0.05 and 5 mm.")
@@ -389,6 +453,18 @@ def slice_stl_to_syringe_gcode(
         raise ValueError("Infill must be between 0 and 100%.")
     if not (1.0 <= syringe_diameter_mm <= 50.0):
         raise ValueError("Syringe inner diameter must be between 1 and 50 mm.")
+    if not (0.05 <= needle_inner_diameter_mm <= 5.0):
+        raise ValueError("Needle inner diameter must be between 0.05 and 5 mm.")
+    if not (0.1 <= syringe_capacity_ml <= 100.0):
+        raise ValueError("Syringe capacity must be between 0.1 and 100 mL.")
+    if not (0.1 <= extrusion_multiplier <= 5.0):
+        raise ValueError("Extrusion multiplier must be between 0.1 and 5.")
+    if not (0.0 <= travel_lift_mm <= 10.0):
+        raise ValueError("Travel lift must be between 0 and 10 mm.")
+    if support_strategy not in {"self_supporting", "support_bath", "manual_scaffold"}:
+        raise ValueError("Unsupported support strategy.")
+    if crosslink_mode not in {"post_print", "support_bath", "manual"}:
+        raise ValueError("Unsupported crosslinking mode.")
 
     triangles = _parse_stl_triangles(stl_data)
     if triangles.shape[0] > 300_000:
@@ -403,7 +479,6 @@ def slice_stl_to_syringe_gcode(
     if float(size[2]) <= 0 or float(size[2]) > 230:
         raise ValueError("Model Z height must be greater than 0 and at most 230 mm.")
 
-    # Center XY on the nominal Ender-3 V2 bed and place the model bottom at Z=0.
     offset = np.asarray(
         [
             bed_center_x_mm - float((mins[0] + maxs[0]) / 2.0),
@@ -418,22 +493,57 @@ def slice_stl_to_syringe_gcode(
     if layer_count > 600:
         raise ValueError("Too many layers; increase layer height.")
 
+    profile = {
+        "material": "sodium_alginate",
+        "alginate_percent_wv": float(alginate_percent_wv),
+        "crosslinker": "calcium_chloride",
+        "calcium_chloride_mM": float(calcium_chloride_mM),
+        "crosslink_mode": crosslink_mode,
+        "support_strategy": support_strategy,
+        "syringe_inner_diameter_mm": float(syringe_diameter_mm),
+        "syringe_capacity_ml": float(syringe_capacity_ml),
+        "needle_inner_diameter_mm": float(needle_inner_diameter_mm),
+        "layer_height_mm": float(layer_height_mm),
+        "bead_width_mm": float(bead_width_mm),
+        "infill_percent": float(infill_percent),
+        "print_speed_mm_s": float(print_feed_mm_min) / 60.0,
+        "travel_speed_mm_s": float(travel_feed_mm_min) / 60.0,
+        "extrusion_multiplier": float(extrusion_multiplier),
+        "travel_lift_mm": float(travel_lift_mm),
+    }
+    advisories = process_advisories(profile)
+
     syringe_area_mm2 = math.pi * (syringe_diameter_mm / 2.0) ** 2
-    e_per_path_mm = bead_width_mm * layer_height_mm / syringe_area_mm2
+    e_per_path_mm = syringe_e_per_path_mm(
+        bead_width_mm=bead_width_mm,
+        layer_height_mm=layer_height_mm,
+        syringe_inner_diameter_mm=syringe_diameter_mm,
+        extrusion_multiplier=extrusion_multiplier,
+    )
+
     infill_spacing = None
     if infill_percent > 0:
         infill_spacing = bead_width_mm / max(infill_percent / 100.0, 0.01)
         infill_spacing = max(bead_width_mm, infill_spacing)
 
     lines = [
-        "; VT Bioprinter syringe slicer output",
+        "; VT Bioprinter alginate syringe slicer output",
         f"; Source: {filename}",
         "; E is syringe plunger travel in mm, NOT filament length.",
-        "; Verify motor direction and experimentally calibrate E-steps before physical extrusion.",
+        "; Physical execution requires verified motor direction and experimentally calibrated E-steps.",
+        f"; material=sodium_alginate",
+        f"; alginate_percent_wv={alginate_percent_wv:.3f}",
+        f"; crosslinker=calcium_chloride",
+        f"; calcium_chloride_mM={calcium_chloride_mM:.3f}",
+        f"; crosslink_mode={crosslink_mode}",
+        f"; support_strategy={support_strategy}",
+        f"; needle_inner_diameter_mm={needle_inner_diameter_mm:.4f}",
         f"; layer_height_mm={layer_height_mm:.4f}",
         f"; bead_width_mm={bead_width_mm:.4f}",
         f"; infill_percent={infill_percent:.2f}",
         f"; syringe_inner_diameter_mm={syringe_diameter_mm:.4f}",
+        f"; syringe_capacity_ml={syringe_capacity_ml:.4f}",
+        f"; extrusion_multiplier={extrusion_multiplier:.4f}",
         f"; e_per_xy_mm={e_per_path_mm:.9f}",
         "G90",
         "M83",
@@ -448,6 +558,10 @@ def slice_stl_to_syringe_gcode(
     generated_layers = 0
     contour_count = 0
     infill_count = 0
+    layer_summaries: list[dict[str, Any]] = []
+    previous_paths: list[list[np.ndarray]] = []
+    unsupported_weighted = 0.0
+    unsupported_samples_weight = 0.0
 
     for layer_index in range(layer_count):
         z_model = min(max_z - 1e-5, (layer_index + 1) * layer_height_mm)
@@ -465,14 +579,37 @@ def slice_stl_to_syringe_gcode(
         if not usable_paths:
             continue
 
+        unsupported_ratio = _estimate_unsupported_ratio(previous_paths, usable_paths) if generated_layers else 0.0
+        layer_length_estimate = sum(
+            float(np.linalg.norm(b - a))
+            for path in usable_paths
+            for a, b in zip(path[:-1], path[1:])
+        )
+        unsupported_weighted += unsupported_ratio * max(layer_length_estimate, 1.0)
+        unsupported_samples_weight += max(layer_length_estimate, 1.0)
+
         lines.append(f";LAYER:{generated_layers}")
+        lines.append(f"; unsupported_ratio={unsupported_ratio:.5f}")
         lines.append(f"G0 Z{z:.4f} F300")
         generated_layers += 1
+        layer_contours = 0
+        layer_infill = 0
+        layer_path = 0.0
+        layer_e = 0.0
+
+        def travel_to(point: np.ndarray) -> None:
+            # Keep travel Z-lift explicit in the generated plan. For soft
+            # hydrogels, a modest lift reduces dragging across deposited strands.
+            if travel_lift_mm > 0:
+                lines.append(f"G0 Z{z + travel_lift_mm:.4f} F300")
+            lines.append(f"G0 X{float(point[0]):.4f} Y{float(point[1]):.4f} F{travel_feed_mm_min}")
+            if travel_lift_mm > 0:
+                lines.append(f"G0 Z{z:.4f} F300")
 
         def emit_path(path: list[np.ndarray]) -> None:
-            nonlocal total_path_mm, total_e_mm, contour_count
+            nonlocal total_path_mm, total_e_mm, contour_count, layer_contours, layer_path, layer_e
             start = path[0]
-            lines.append(f"G0 X{float(start[0]):.4f} Y{float(start[1]):.4f} F{travel_feed_mm_min}")
+            travel_to(start)
             for point in path[1:]:
                 prev = start
                 length = float(np.linalg.norm(point - prev))
@@ -486,7 +623,10 @@ def slice_stl_to_syringe_gcode(
                 )
                 total_path_mm += length
                 total_e_mm += e
+                layer_path += length
+                layer_e += e
                 contour_count += 1
+                layer_contours += 1
                 start = point
 
         for path in usable_paths:
@@ -503,14 +643,28 @@ def slice_stl_to_syringe_gcode(
                 if length <= 1e-6:
                     continue
                 e = length * e_per_path_mm
-                lines.append(f"G0 X{float(a[0]):.4f} Y{float(a[1]):.4f} F{travel_feed_mm_min}")
+                travel_to(a)
                 lines.append(
                     f"G1 X{float(b[0]):.4f} Y{float(b[1]):.4f} "
                     f"E{e:.7f} F{print_feed_mm_min}"
                 )
                 total_path_mm += length
                 total_e_mm += e
+                layer_path += length
+                layer_e += e
                 infill_count += 1
+                layer_infill += 1
+
+        layer_summaries.append({
+            "layer": generated_layers - 1,
+            "z_mm": round(z, 5),
+            "unsupported_ratio": round(unsupported_ratio, 5),
+            "contour_segments": layer_contours,
+            "infill_segments": layer_infill,
+            "deposition_path_mm": round(layer_path, 4),
+            "plunger_travel_mm": round(layer_e, 6),
+        })
+        previous_paths = usable_paths
 
     if generated_layers == 0:
         raise ValueError("No printable STL cross-sections were generated.")
@@ -522,29 +676,59 @@ def slice_stl_to_syringe_gcode(
             f"G0 X{bed_center_x_mm:.3f} Y{bed_center_y_mm:.3f} F{travel_feed_mm_min}",
             "M400",
             "M114",
-            "; End syringe-sliced plan",
+            "; End alginate syringe-sliced plan",
         ]
     )
     gcode = "\n".join(lines) + "\n"
-    output_name = Path(filename).stem + "_syringe.gcode"
+    output_name = Path(filename).stem + "_alginate_syringe.gcode"
     plan = parse_gcode(gcode, output_name)
+
+    estimated_volume_ml = total_e_mm * syringe_area_mm2 / 1000.0
+    unsupported_ratio = unsupported_weighted / unsupported_samples_weight if unsupported_samples_weight else 0.0
+    preflight = build_preflight(
+        model_size_mm=[round(float(v), 4) for v in size],
+        bounds_mm=plan["bounds_mm"],
+        estimated_volume_ml=estimated_volume_ml,
+        syringe_capacity_ml=syringe_capacity_ml,
+        unsupported_ratio=unsupported_ratio,
+        support_strategy=support_strategy,
+        e_steps_calibrated=e_steps_calibrated,
+        motor_direction_verified=motor_direction_verified,
+    )
+
     plan["slicer"] = {
+        "engine": "VT Bioprinter research slicer",
         "source_filename": filename,
         "triangle_count": int(triangles.shape[0]),
         "model_size_mm": [round(float(v), 4) for v in size],
+        "material_profile": profile,
+        "process_advisories": advisories,
         "layer_height_mm": round(layer_height_mm, 5),
         "bead_width_mm": round(bead_width_mm, 5),
         "infill_percent": round(infill_percent, 3),
         "syringe_diameter_mm": round(syringe_diameter_mm, 5),
+        "needle_inner_diameter_mm": round(needle_inner_diameter_mm, 5),
         "e_per_xy_mm": round(e_per_path_mm, 9),
         "generated_layers": generated_layers,
         "contour_segments": contour_count,
         "infill_segments": infill_count,
         "estimated_plunger_travel_mm": round(total_e_mm, 6),
-        "estimated_volume_ml": round(total_e_mm * syringe_area_mm2 / 1000.0, 6),
+        "estimated_volume_ml": round(estimated_volume_ml, 6),
+        "unsupported_path_ratio": round(unsupported_ratio, 6),
+        "support_strategy": support_strategy,
+        "crosslink_mode": crosslink_mode,
+        "layer_summaries": layer_summaries,
+        "preflight": preflight,
     }
     save_plan(plan)
-    return {"filename": output_name, "gcode": gcode, "plan": plan, "summary": plan["slicer"]}
+    return {
+        "filename": output_name,
+        "gcode": gcode,
+        "plan": plan,
+        "summary": plan["slicer"],
+        "preflight": preflight,
+        "advisories": advisories,
+    }
 
 
 def printer_to_camera(profile: dict[str, Any], printer_xyz_mm: list[float]) -> list[float]:

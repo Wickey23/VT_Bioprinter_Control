@@ -201,6 +201,9 @@ class QualityAnalysisRequest(BaseModel):
 
 class PrintStartRequest(BaseModel):
     confirm_physical_stop_available: bool = False
+    confirm_x_endstop_clearance: bool = False
+    confirm_surface_clean: bool = False
+    run_preprint_calibration: bool = True
 
 
 def load_token() -> str:
@@ -1323,6 +1326,134 @@ def api_quality_final_surface(payload: QualityAnalysisRequest) -> dict[str, Any]
     return result
 
 
+def _preprint_serial_checks(target: dict[str, Any]) -> dict[str, Any]:
+    responses: dict[str, Any] = {}
+    try:
+        with SERIAL_LOCK:
+            with serial.Serial(target["device"], BAUD, timeout=0.25, exclusive=True) as port:
+                time.sleep(1.0)
+                port.reset_input_buffer()
+                port.write(b"\n")
+                port.flush()
+                time.sleep(0.35)
+                port.reset_input_buffer()
+
+                m115 = _read_until_ok(port, "M115", 5.0)
+                m119 = _read_until_ok(port, "M119", 5.0)
+                responses["firmware"] = m115
+                responses["endstops"] = _parse_endstops(m119)
+    except HTTPException:
+        raise
+    except (serial.SerialException, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Pre-print serial check failed: {exc}")
+
+    endstops = responses.get("endstops") or {}
+    missing = [name for name in ("x_min", "y_min", "z_min") if name not in endstops]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail="Pre-print calibration could not verify endstops: " + ", ".join(missing),
+        )
+    return responses
+
+
+def _run_preprint_calibration(
+    *,
+    target: dict[str, Any],
+    confirm_surface_clean: bool,
+) -> dict[str, Any]:
+    steps: list[dict[str, Any]] = []
+
+    serial_checks = _preprint_serial_checks(target)
+    steps.append({
+        "name": "Printer communication + endstops",
+        "ok": True,
+        "detail": "Marlin responded and X/Y/Z minimum endstops were readable.",
+        "data": {"endstops": serial_checks.get("endstops")},
+    })
+
+    camera = usb_camera_status()
+    if not camera.get("usb_detected") or not camera.get("sdk_available"):
+        raise HTTPException(
+            status_code=409,
+            detail="D405 pre-print calibration failed: camera or RealSense SDK is unavailable.",
+        )
+    live = live_camera_status()
+    if not live.get("running"):
+        live = start_live_camera()
+    if live.get("error"):
+        raise HTTPException(status_code=409, detail=f"D405 live start failed: {live['error']}")
+    steps.append({
+        "name": "D405 live camera",
+        "ok": True,
+        "detail": f"{camera.get('model') or 'D405'} is detected and live.",
+    })
+
+    profile = load_profile()
+    if not profile:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Camera-to-printer calibration has never been created. Complete the four-corner "
+                "bed calibration once on the Calibration page; later prints can validate and reuse it automatically."
+            ),
+        )
+
+    saved_serial = str(profile.get("camera", {}).get("serial") or "")
+    active_serial = str(camera.get("serial_number") or "")
+    if saved_serial and active_serial and saved_serial != active_serial:
+        raise HTTPException(
+            status_code=409,
+            detail="Saved camera calibration belongs to a different RealSense serial number.",
+        )
+    if not profile.get("nozzle_reference"):
+        raise HTTPException(
+            status_code=409,
+            detail="Nozzle reference is missing. Mark the syringe/nozzle tip once on the Calibration page.",
+        )
+    steps.append({
+        "name": "Camera-to-printer transform",
+        "ok": True,
+        "detail": "Saved transform and nozzle reference match the active D405.",
+    })
+
+    if not confirm_surface_clean:
+        raise HTTPException(
+            status_code=409,
+            detail="Confirm the print surface is clean before the automatic D405 baseline refresh.",
+        )
+
+    try:
+        surface = analyze_surface(
+            profile,
+            sample_live_pixels,
+            columns=14,
+            rows=10,
+        )
+        profile = save_surface_baseline(profile, surface)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=f"Automatic clean-surface baseline failed: {exc}") from exc
+
+    steps.append({
+        "name": "Clean-surface depth baseline",
+        "ok": True,
+        "detail": "Fresh 14×10 D405 depth baseline saved immediately before printing.",
+        "data": {
+            "sample_count": surface.get("sample_count"),
+            "rms_z_mm": surface.get("rms_z_mm"),
+            "peak_to_peak_mm": surface.get("peak_to_peak_mm"),
+        },
+    })
+    log_event(
+        "preprint_calibration",
+        {
+            "steps": steps,
+            "camera_serial": active_serial or None,
+        },
+    )
+    return {"ok": True, "steps": steps, "profile": profile}
+
+
 def _print_monitor_callback(layer: int) -> dict[str, Any]:
     profile = load_profile()
     plan = load_plan()
@@ -1403,6 +1534,14 @@ def api_print_start(payload: PrintStartRequest) -> dict[str, Any]:
             status_code=409,
             detail="Confirm that the physical power cutoff is immediately available before starting a print.",
         )
+    if not payload.confirm_x_endstop_clearance:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Confirm Enderstruder/X-endstop clearance before starting. "
+                "The generated bioprint G-code contains G28 homing."
+            ),
+        )
 
     commissioning = read_commissioning()
     if not commissioning.get("unlocked"):
@@ -1442,6 +1581,13 @@ def api_print_start(payload: PrintStartRequest) -> dict[str, Any]:
     if not target:
         raise HTTPException(status_code=409, detail="No high-confidence Creality/CH340 serial interface is connected.")
 
+    calibration = None
+    if payload.run_preprint_calibration:
+        calibration = _run_preprint_calibration(
+            target=target,
+            confirm_surface_clean=payload.confirm_surface_clean,
+        )
+
     monitor_callback = _print_monitor_callback if load_profile() and load_profile().get("surface_baseline") else None
     try:
         state = PRINT_RUNNER.start(
@@ -1455,7 +1601,8 @@ def api_print_start(payload: PrintStartRequest) -> dict[str, Any]:
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    log_event("print_started", {"filename": plan.get("filename")})
+    log_event("print_started", {"filename": plan.get("filename"), "preprint_calibration": bool(calibration)})
+    state["preprint_calibration"] = calibration
     return state
 
 

@@ -9,7 +9,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 
-app = FastAPI(title="VT Bioprinter Cloud", version="0.2.0")
+app = FastAPI(title="VT Bioprinter Cloud", version="0.2.1")
 
 DEVICE_URL = os.environ.get("BIOPRINTER_DEVICE_URL", "").rstrip("/")
 DEVICE_TOKEN = os.environ.get("BIOPRINTER_DEVICE_TOKEN", "")
@@ -99,7 +99,7 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "vt-bioprinter-cloud",
-        "version": "0.2.0",
+        "version": "0.2.1",
         "time_unix": int(time.time()),
         "device_configured": device_configured(),
         "remote_control_locked": not bool(CLOUD_ACCESS_KEY),

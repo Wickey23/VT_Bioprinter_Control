@@ -804,22 +804,15 @@ def api_network_saved() -> dict[str, Any]:
 
 @app.post("/api/network/priority", dependencies=[Depends(require_token)])
 def api_network_priority(payload: WifiPriorityRequest) -> dict[str, Any]:
-    proc = run_network_helper(
-        "set-priority",
-        payload.connection,
+    if not NETWORK_HELPER.exists():
+        raise HTTPException(status_code=503, detail="Network helper is not installed.")
+    proc = run_command(
+        [
+            "sudo", "-n", str(NETWORK_HELPER),
+            "set-priority", payload.connection, str(payload.priority),
+        ],
         timeout=15,
     )
-    if proc.returncode != 0:
-        # Older helper revisions do not accept the priority as stdin/argument,
-        # so retry by invoking it directly with both positional parameters.
-        args = ["sudo", "-n", str(NETWORK_HELPER), "set-priority", payload.connection, str(payload.priority)]
-        proc = run_command(args, timeout=15)
-    else:
-        # set-priority needs both positional arguments; this branch is only here
-        # for defensive compatibility and should not normally be reached.
-        args = ["sudo", "-n", str(NETWORK_HELPER), "set-priority", payload.connection, str(payload.priority)]
-        proc = run_command(args, timeout=15)
-
     if proc.returncode != 0:
         raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to set Wi-Fi priority.")
     return {"ok": True, "connection": payload.connection, "priority": payload.priority}

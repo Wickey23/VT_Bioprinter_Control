@@ -71,6 +71,7 @@ def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
     total_motion = 0.0
     total_extruding_motion = 0.0
     extrusion_delta_total = 0.0
+    estimated_time_seconds = 0.0
 
     for line_number, raw in enumerate(text.splitlines(), start=1):
         stripped = raw.strip()
@@ -165,6 +166,8 @@ def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
             continue
 
         total_motion += length
+        if length > 1e-9 and feed > 1e-9:
+            estimated_time_seconds += length / feed * 60.0
         if extruding:
             total_extruding_motion += length
             extrusion_delta_total += e_delta
@@ -200,6 +203,7 @@ def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
         "total_motion_mm": round(total_motion, 3),
         "extruding_motion_mm": round(total_extruding_motion, 3),
         "extrusion_delta_total": round(extrusion_delta_total, 5),
+        "estimated_time_seconds": round(estimated_time_seconds, 2),
         "bounds_mm": {
             "min": [round(float(v), 4) for v in mins],
             "max": [round(float(v), 4) for v in maxs],

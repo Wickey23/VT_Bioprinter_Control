@@ -206,6 +206,11 @@ class PrintStartRequest(BaseModel):
     run_preprint_calibration: bool = True
 
 
+class DryRunStartRequest(BaseModel):
+    confirm_physical_stop_available: bool = False
+    confirm_x_endstop_clearance: bool = False
+
+
 def load_token() -> str:
     try:
         return TOKEN_FILE.read_text(encoding="utf-8").strip()
@@ -1520,6 +1525,106 @@ def _print_monitor_callback(layer: int) -> dict[str, Any]:
         },
     )
     return assessment
+
+
+def _motion_only_gcode(gcode: str) -> str:
+    """Return a motion-only version of a VT slicer plan.
+
+    E words and extrusion-only state commands are removed. XYZ homing/travel,
+    heater-off commands, waits, and position reporting are retained.
+    """
+    output: list[str] = []
+    for raw in gcode.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(";"):
+            output.append(stripped)
+            continue
+
+        code, *comment_parts = raw.split(";", 1)
+        code = code.strip()
+        if not code:
+            continue
+        parts = code.split()
+        command = parts[0].upper()
+
+        if command in {"M82", "M83", "M302"}:
+            continue
+        if command == "G92":
+            kept = [parts[0]] + [token for token in parts[1:] if not token.upper().startswith("E")]
+            if len(kept) == 1:
+                continue
+            code = " ".join(kept)
+        elif command in {"G0", "G00", "G1", "G01"}:
+            kept = [parts[0]] + [token for token in parts[1:] if not token.upper().startswith("E")]
+            code = " ".join(kept)
+
+        if comment_parts:
+            code += " ;" + comment_parts[0]
+        output.append(code)
+
+    return "\n".join(output) + "\n"
+
+
+@app.post("/api/print/dry-run", dependencies=[Depends(require_token)])
+def api_print_dry_run(payload: DryRunStartRequest) -> dict[str, Any]:
+    if not payload.confirm_physical_stop_available:
+        raise HTTPException(
+            status_code=409,
+            detail="Confirm that the physical power cutoff is immediately available.",
+        )
+    if not payload.confirm_x_endstop_clearance:
+        raise HTTPException(
+            status_code=409,
+            detail="Confirm Enderstruder/X-endstop clearance before the motion-only dry run. The plan contains G28 homing.",
+        )
+
+    commissioning = read_commissioning()
+    if not commissioning.get("unlocked"):
+        raise HTTPException(status_code=423, detail="Commissioning lock is active.")
+
+    plan = load_plan()
+    if not plan:
+        raise HTTPException(status_code=409, detail="No G-code print plan is loaded.")
+
+    slicer = plan.get("slicer")
+    if not isinstance(slicer, dict):
+        raise HTTPException(status_code=409, detail="Dry run requires a VT bioprinter slicer plan.")
+
+    preflight = slicer.get("preflight") or {}
+    workspace_check = next(
+        (check for check in preflight.get("checks", []) if check.get("name") == "Workspace"),
+        None,
+    )
+    if not workspace_check or not workspace_check.get("ok"):
+        raise HTTPException(status_code=409, detail="Workspace preflight must pass before a motion-only dry run.")
+
+    source = plan.get("source_gcode")
+    if not isinstance(source, str) or not source.strip():
+        raise HTTPException(status_code=409, detail="The active plan has no executable source G-code.")
+
+    target = chosen_printer()
+    if not target:
+        raise HTTPException(status_code=409, detail="No high-confidence Creality/CH340 serial interface is connected.")
+
+    dry_gcode = _motion_only_gcode(source)
+    try:
+        state = PRINT_RUNNER.start(
+            filename=str(plan.get("filename") or "print.gcode") + " [MOTION ONLY]",
+            gcode=dry_gcode,
+            device=target["device"],
+            baud=BAUD,
+            serial_lock=SERIAL_LOCK,
+            monitor_callback=None,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    log_event("print_dry_run_started", {"filename": plan.get("filename"), "extrusion_enabled": False})
+    state["dry_run"] = True
+    state["extrusion_enabled"] = False
+    return state
 
 
 @app.get("/api/print/status", dependencies=[Depends(require_token)])

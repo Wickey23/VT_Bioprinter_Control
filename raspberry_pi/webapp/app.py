@@ -154,12 +154,22 @@ class PlanLoadRequest(BaseModel):
 class SlicerRequest(BaseModel):
     filename: str = Field(default="model.stl", min_length=1, max_length=256)
     stl_base64: str = Field(min_length=4, max_length=20_000_000)
-    layer_height_mm: float = Field(default=0.5, ge=0.05, le=5.0)
-    bead_width_mm: float = Field(default=0.8, ge=0.05, le=10.0)
+    layer_height_mm: float = Field(default=0.30, ge=0.05, le=5.0)
+    bead_width_mm: float = Field(default=0.80, ge=0.05, le=10.0)
     infill_percent: float = Field(default=20.0, ge=0.0, le=100.0)
     syringe_diameter_mm: float = Field(default=14.5, ge=1.0, le=50.0)
-    print_feed_mm_min: int = Field(default=300, ge=30, le=3000)
+    syringe_capacity_ml: float = Field(default=10.0, ge=0.1, le=100.0)
+    needle_inner_diameter_mm: float = Field(default=0.60, ge=0.05, le=5.0)
+    alginate_percent_wv: float = Field(default=3.0, ge=0.1, le=20.0)
+    calcium_chloride_mM: float = Field(default=80.0, ge=0.0, le=2000.0)
+    crosslink_mode: str = Field(default="post_print", pattern="^(post_print|support_bath|manual)$")
+    support_strategy: str = Field(default="self_supporting", pattern="^(self_supporting|support_bath|manual_scaffold)$")
+    extrusion_multiplier: float = Field(default=1.0, ge=0.1, le=5.0)
+    travel_lift_mm: float = Field(default=1.0, ge=0.0, le=10.0)
+    print_feed_mm_min: int = Field(default=240, ge=30, le=3000)
     travel_feed_mm_min: int = Field(default=1200, ge=60, le=6000)
+    e_steps_calibrated: bool = False
+    motor_direction_verified: bool = False
 
 
 class ExperimentStartRequest(BaseModel):
@@ -1252,8 +1262,18 @@ def api_slice_stl(payload: SlicerRequest) -> dict[str, Any]:
             bead_width_mm=payload.bead_width_mm,
             infill_percent=payload.infill_percent,
             syringe_diameter_mm=payload.syringe_diameter_mm,
+            syringe_capacity_ml=payload.syringe_capacity_ml,
+            needle_inner_diameter_mm=payload.needle_inner_diameter_mm,
+            alginate_percent_wv=payload.alginate_percent_wv,
+            calcium_chloride_mM=payload.calcium_chloride_mM,
+            crosslink_mode=payload.crosslink_mode,
+            support_strategy=payload.support_strategy,
+            extrusion_multiplier=payload.extrusion_multiplier,
+            travel_lift_mm=payload.travel_lift_mm,
             print_feed_mm_min=payload.print_feed_mm_min,
             travel_feed_mm_min=payload.travel_feed_mm_min,
+            e_steps_calibrated=payload.e_steps_calibrated,
+            motor_direction_verified=payload.motor_direction_verified,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

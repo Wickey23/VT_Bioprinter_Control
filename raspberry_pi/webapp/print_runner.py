@@ -334,8 +334,9 @@ class PrintRunner:
 
         except Exception as exc:
             with self._lock:
-                self._state["state"] = "ERROR"
-                self._state["error"] = str(exc)
+                if self._state.get("state") != "EMERGENCY_STOP":
+                    self._state["state"] = "ERROR"
+                    self._state["error"] = str(exc)
         finally:
             with self._lock:
                 self._port = None

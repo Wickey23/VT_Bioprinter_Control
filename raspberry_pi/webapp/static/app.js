@@ -1476,6 +1476,12 @@ function renderPlan(plan){
   ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 
   $("planMessage").textContent="Plan parsed. It will appear as the expected extrusion path in Monitor after camera calibration.";
+  if(plan.slicer?.preflight){
+    renderSlicerPreflight(plan.slicer.preflight,plan.slicer.process_advisories||[]);
+  }else{
+    state.slicerPreflightReady=false;
+    updatePrintStartReadiness();
+  }
   drawSlicerPreview(plan);
   updateAnalyticsReadiness();
 }

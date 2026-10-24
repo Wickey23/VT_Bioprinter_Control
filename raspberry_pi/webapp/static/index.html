@@ -509,6 +509,39 @@
         <article class="card">
           <div class="card-title">
             <div>
+              <p class="eyebrow">Bioprint preparation</p>
+              <h3>STL → syringe G-code slicer</h3>
+            </div>
+            <span class="pill">PREVIEW / GENERATE</span>
+          </div>
+          <p>Slice an STL into perimeter and alternating hatch-infill paths. Extrusion is calculated as syringe plunger travel from bead volume, not filament length.</p>
+
+          <div class="file-loader">
+            <input id="slicerStlFile" type="file" accept=".stl,model/stl,application/sla">
+            <button id="sliceStl" class="primary">Slice STL for syringe</button>
+            <button id="downloadSlicedGcode" class="secondary" disabled>Download G-code</button>
+          </div>
+
+          <div class="calibration-form">
+            <label>Layer height (mm)<input id="slicerLayerHeight" type="number" step="0.05" min="0.05" max="5" value="0.50"></label>
+            <label>Bead / line width (mm)<input id="slicerBeadWidth" type="number" step="0.05" min="0.05" max="10" value="0.80"></label>
+            <label>Infill (%)<input id="slicerInfill" type="number" step="1" min="0" max="100" value="20"></label>
+            <label>Syringe inner diameter (mm)<input id="slicerSyringeDiameter" type="number" step="0.01" min="1" max="50" value="14.5"></label>
+            <label>Print speed (mm/min)<input id="slicerPrintFeed" type="number" step="10" min="30" max="3000" value="300"></label>
+            <label>Travel speed (mm/min)<input id="slicerTravelFeed" type="number" step="10" min="60" max="6000" value="1200"></label>
+          </div>
+
+          <p id="slicerMessage" class="muted">Choose an STL. Generated G-code is loaded as the active print plan for preview/monitoring; it is not executed automatically.</p>
+          <div id="slicerSummary" class="detail-list"></div>
+          <div class="slicer-preview-wrap">
+            <canvas id="slicerPreview" width="720" height="420" aria-label="2D preview of syringe-sliced toolpaths"></canvas>
+          </div>
+          <p class="muted">Generated E values are plunger displacement. Do not physically extrude until Enderstruder direction and E-steps are experimentally calibrated.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
               <p class="eyebrow">Enderstruder mechanics</p>
               <h3>Syringe motor calculator</h3>
             </div>

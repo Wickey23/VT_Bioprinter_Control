@@ -437,7 +437,19 @@ def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, 
     if not target:
         raise HTTPException(status_code=409, detail="No high-confidence Creality/CH340 serial interface is connected.")
 
-    commands = ["G91", f"G0 {axis}{distance_mm:g} F{feed_mm_min}", "G90"]
+    # M400 is critical here: Marlin can acknowledge a G0/G1 as soon as it is
+    # queued, before the stepper motion has physically completed. On CH340-
+    # connected Creality boards, closing the serial session immediately after
+    # that acknowledgement can reset/reinitialize the controller and interrupt
+    # the queued jog. Wait for the planner to drain before restoring absolute
+    # mode and before releasing the serial port.
+    commands = [
+        "G91",
+        f"G0 {axis}{distance_mm:g} F{feed_mm_min}",
+        "M400",
+        "G90",
+        "M400",
+    ]
     responses: list[str] = []
     try:
         with SERIAL_LOCK:
@@ -471,6 +483,7 @@ def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, 
         "axis": axis,
         "distance_mm": distance_mm,
         "feed_mm_min": feed_mm_min,
+        "waited_for_motion": True,
         "response": responses,
     }
 

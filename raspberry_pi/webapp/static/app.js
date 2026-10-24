@@ -2297,8 +2297,14 @@ $("startPhysicalPrint").onclick=()=>startPhysicalPrint();
 $("pausePhysicalPrint").onclick=()=>pausePhysicalPrint();
 $("resumePhysicalPrint").onclick=()=>resumePhysicalPrint();
 $("stopPhysicalPrint").onclick=()=>stopPhysicalPrint();
-$("slicerLayerPreview").oninput=()=>drawSlicerPreview(state.planSummary);drawSlicerPreview3d(state.planSummary);
-$("slicerShowAllLayers").onchange=()=>drawSlicerPreview(state.planSummary);drawSlicerPreview3d(state.planSummary);
+$("slicerLayerPreview").oninput=()=>{
+  drawSlicerPreview(state.planSummary);
+  drawSlicerPreview3d(state.planSummary);
+};
+$("slicerShowAllLayers").onchange=()=>{
+  drawSlicerPreview(state.planSummary);
+  drawSlicerPreview3d(state.planSummary);
+};
 $("slicerTemperatureMode").onchange=()=>{
   const heated=$("slicerTemperatureMode").value==="heated_bed";
   $("slicerBedTemperature").disabled=!heated;

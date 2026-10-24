@@ -26,13 +26,14 @@ echo "[2/6] Syncing Python dependencies..."
 "$PIP" install -r "$SCRIPT_DIR/requirements.txt"
 
 echo "[3/6] Compiling controller Python..."
-"$PYTHON" -m py_compile   "$SCRIPT_DIR/webapp/app.py"   "$SCRIPT_DIR/webapp/realsense.py"   "$SCRIPT_DIR/webapp/calibration.py"   "$SCRIPT_DIR/webapp/print_plan.py"   "$SCRIPT_DIR/webapp/experiments.py"   "$SCRIPT_DIR/webapp/quality.py"   "$SCRIPT_DIR/webapp/vision.py"   "$SCRIPT_DIR/controller_self_test.py"
+"$PYTHON" -m py_compile   "$SCRIPT_DIR/webapp/app.py"   "$SCRIPT_DIR/webapp/realsense.py"   "$SCRIPT_DIR/webapp/calibration.py"   "$SCRIPT_DIR/webapp/print_plan.py"   "$SCRIPT_DIR/webapp/bioprint.py"   "$SCRIPT_DIR/webapp/experiments.py"   "$SCRIPT_DIR/webapp/quality.py"   "$SCRIPT_DIR/webapp/vision.py"   "$SCRIPT_DIR/controller_self_test.py"
 
 echo "[4/6] Running offline self-tests..."
 cd "$SCRIPT_DIR"
 "$PYTHON" controller_self_test.py
 
-echo "[5/6] Restarting web controller..."
+echo "[5/6] Refreshing network helper and restarting web controller..."
+sudo install -m 0755 "$SCRIPT_DIR/network_helper.sh" /usr/local/sbin/vt-bioprinter-network
 sudo systemctl restart vt-bioprinter-web.service
 sleep 2
 sudo systemctl --no-pager --full is-active vt-bioprinter-web.service

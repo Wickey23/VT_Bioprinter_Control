@@ -101,6 +101,15 @@ class WifiForgetRequest(BaseModel):
     connection: str = Field(min_length=1, max_length=256)
 
 
+class WifiPriorityRequest(BaseModel):
+    connection: str = Field(min_length=1, max_length=256)
+    priority: int = Field(ge=-999, le=999)
+
+
+class WifiActivateRequest(BaseModel):
+    connection: str = Field(min_length=1, max_length=256)
+
+
 class SafeCommandRequest(BaseModel):
     command: str = Field(min_length=1, max_length=64)
 
@@ -756,15 +765,75 @@ def api_network_connect(payload: WifiConnectRequest) -> JSONResponse:
 
 @app.get("/api/network/saved", dependencies=[Depends(require_token)])
 def api_network_saved() -> dict[str, Any]:
-    proc = run_command(["nmcli", "-t", "--escape", "yes", "-f", "NAME,TYPE", "connection", "show"], timeout=10)
+    proc = run_command(
+        [
+            "nmcli", "-t", "--escape", "yes",
+            "-f", "NAME,TYPE,AUTOCONNECT,AUTOCONNECT-PRIORITY",
+            "connection", "show",
+        ],
+        timeout=10,
+    )
     if proc.returncode != 0:
         raise HTTPException(status_code=500, detail=proc.stderr.strip() or "Unable to list saved connections.")
-    saved = []
+
+    active = active_wifi_connection()
+    saved: list[dict[str, Any]] = []
     for line in proc.stdout.splitlines():
-        parts = split_nmcli(line, 1)
-        if len(parts) == 2 and parts[1] == "802-11-wireless" and parts[0] != HOTSPOT_NAME:
-            saved.append(parts[0])
+        parts = split_nmcli(line, 3)
+        if len(parts) != 4:
+            continue
+        name, kind, autoconnect, priority = parts
+        if kind != "802-11-wireless" or name == HOTSPOT_NAME:
+            continue
+        try:
+            priority_value = int(priority or "0")
+        except ValueError:
+            priority_value = 0
+        saved.append(
+            {
+                "name": name,
+                "active": name == active,
+                "autoconnect": str(autoconnect).lower() in {"yes", "true", "1"},
+                "priority": priority_value,
+            }
+        )
+
+    saved.sort(key=lambda item: (-int(item["priority"]), not bool(item["active"]), str(item["name"]).lower()))
     return {"connections": saved}
+
+
+@app.post("/api/network/priority", dependencies=[Depends(require_token)])
+def api_network_priority(payload: WifiPriorityRequest) -> dict[str, Any]:
+    proc = run_network_helper(
+        "set-priority",
+        payload.connection,
+        timeout=15,
+    )
+    if proc.returncode != 0:
+        # Older helper revisions do not accept the priority as stdin/argument,
+        # so retry by invoking it directly with both positional parameters.
+        args = ["sudo", "-n", str(NETWORK_HELPER), "set-priority", payload.connection, str(payload.priority)]
+        proc = run_command(args, timeout=15)
+    else:
+        # set-priority needs both positional arguments; this branch is only here
+        # for defensive compatibility and should not normally be reached.
+        args = ["sudo", "-n", str(NETWORK_HELPER), "set-priority", payload.connection, str(payload.priority)]
+        proc = run_command(args, timeout=15)
+
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to set Wi-Fi priority.")
+    return {"ok": True, "connection": payload.connection, "priority": payload.priority}
+
+
+@app.post("/api/network/activate", dependencies=[Depends(require_token)])
+def api_network_activate(payload: WifiActivateRequest) -> dict[str, Any]:
+    proc = run_network_helper("activate", payload.connection, timeout=40)
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=proc.stderr.strip() or proc.stdout.strip() or "Unable to activate saved Wi-Fi.")
+    return {
+        "ok": True,
+        "message": "Saved Wi-Fi activation requested. This page may disconnect while the Pi changes networks.",
+    }
 
 
 @app.post("/api/network/forget", dependencies=[Depends(require_token)])

@@ -103,6 +103,12 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/api/auth/check")
+def auth_check(x_cloud_access_key: str | None = Header(default=None)) -> dict[str, bool]:
+    require_cloud_key(x_cloud_access_key)
+    return {"ok": True}
+
+
 @app.get("/api/device/status")
 async def device_status() -> dict[str, Any]:
     if not device_configured():

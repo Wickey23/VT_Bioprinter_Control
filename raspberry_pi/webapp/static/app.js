@@ -1307,7 +1307,9 @@ function downloadSlicedGcode(){
 function updatePrintStartReadiness(){
   const running=!!state.printState?.running;
   const confirmed=!!$("confirmPhysicalStop")?.checked;
-  $("startPhysicalPrint").disabled=running||!state.slicerPreflightReady||!confirmed;
+  const clearance=!!$("confirmXClearance")?.checked;
+  const clean=!!$("confirmSurfaceClean")?.checked;
+  $("startPhysicalPrint").disabled=running||!confirmed||!clearance||!clean;
 }
 
 function renderPrintRunner(p){
@@ -1416,17 +1418,40 @@ async function startPhysicalPrint(){
     $("printRunnerMessage").textContent="Confirm that the physical power cutoff is immediately reachable.";
     return;
   }
-  if(!confirm("Start the loaded bioprint now? The printer will physically home/move/extrude according to the loaded G-code. Keep the physical power cutoff within reach."))return;
-  $("printRunnerMessage").textContent="Starting physical print…";
+  if(!$("confirmXClearance").checked){
+    $("printRunnerMessage").textContent="Verify Enderstruder/X-endstop clearance before homing.";
+    return;
+  }
+  if(!$("confirmSurfaceClean").checked){
+    $("printRunnerMessage").textContent="Confirm the print surface is clean so the D405 can capture a fresh baseline.";
+    return;
+  }
+
+  if(!confirm("Run the automatic pre-print calibration sequence, then start the print only if every physical preflight check passes?"))return;
+  $("printRunnerMessage").textContent="Running pre-print calibration: printer/endstops → D405 → saved transform → nozzle reference → clean-surface baseline…";
+  $("preprintCalibrationDetails").innerHTML="";
   try{
     await startPrintCameraView();
     const p=await api("/api/print/start",{
       method:"POST",
-      body:JSON.stringify({confirm_physical_stop_available:true})
+      body:JSON.stringify({
+        confirm_physical_stop_available:true,
+        confirm_x_endstop_clearance:true,
+        confirm_surface_clean:true,
+        run_preprint_calibration:true
+      })
     });
+    if(p.preprint_calibration?.steps){
+      $("preprintCalibrationDetails").innerHTML=p.preprint_calibration.steps.map(step=>
+        "<div><span>"+esc(step.name)+"</span><strong>"+(step.ok?"PASS":"BLOCK")+"</strong><small>"+esc(step.detail||"")+"</small></div>"
+      ).join("");
+    }
     renderPrintRunner(p);
   }catch(err){
-    $("printRunnerMessage").textContent="Start blocked: "+err.message;
+    $("printRunnerMessage").textContent="Calibration/start blocked: "+err.message;
+    $("preprintCalibrationDetails").innerHTML=
+      '<div><span>Pre-print sequence</span><strong>BLOCKED</strong><small>'+esc(err.message)+'</small></div>';
+    await loadCalibration().catch(()=>{});
     await loadPrintRunner().catch(()=>{});
   }
 }
@@ -1971,6 +1996,8 @@ $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e
 $("sliceStl").onclick=()=>sliceStlForSyringe();
 $("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
 $("confirmPhysicalStop").onchange=()=>updatePrintStartReadiness();
+$("confirmXClearance").onchange=()=>updatePrintStartReadiness();
+$("confirmSurfaceClean").onchange=()=>updatePrintStartReadiness();
 $("startPhysicalPrint").onclick=()=>startPhysicalPrint();
 $("pausePhysicalPrint").onclick=()=>pausePhysicalPrint();
 $("resumePhysicalPrint").onclick=()=>resumePhysicalPrint();

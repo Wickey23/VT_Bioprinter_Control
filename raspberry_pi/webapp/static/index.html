@@ -586,6 +586,13 @@
             </div>
           </div>
 
+          <div class="jog-toolbar">
+            <label>Preview layer
+              <input id="slicerLayerPreview" type="range" min="0" max="0" value="0" step="1" disabled>
+            </label>
+            <span id="slicerLayerPreviewLabel" class="muted">All layers</span>
+            <label><input id="slicerShowAllLayers" type="checkbox" checked> Show all layers</label>
+          </div>
           <div class="slicer-preview-wrap">
             <canvas id="slicerPreview" width="720" height="420" aria-label="2D preview of syringe-sliced toolpaths"></canvas>
           </div>

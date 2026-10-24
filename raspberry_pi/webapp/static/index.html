@@ -514,29 +514,82 @@
             </div>
             <span class="pill">PREVIEW / GENERATE</span>
           </div>
-          <p>Slice an STL into perimeter and alternating hatch-infill paths. Extrusion is calculated as syringe plunger travel from bead volume, not filament length.</p>
+          <p>Research slicer for sodium-alginate syringe extrusion. It plans XYZ travel, perimeter/infill deposition, volumetric plunger motion, travel lifts, support risk, crosslinking metadata, syringe usage, and print-readiness checks.</p>
 
           <div class="file-loader">
             <input id="slicerStlFile" type="file" accept=".stl,model/stl,application/sla">
-            <button id="sliceStl" class="primary">Slice STL for syringe</button>
+            <button id="sliceStl" class="primary">Plan alginate print</button>
             <button id="downloadSlicedGcode" class="secondary" disabled>Download G-code</button>
           </div>
 
+          <p class="eyebrow">Material & crosslinking</p>
           <div class="calibration-form">
-            <label>Layer height (mm)<input id="slicerLayerHeight" type="number" step="0.05" min="0.05" max="5" value="0.50"></label>
+            <label>Alginate concentration (% w/v)<input id="slicerAlginatePercent" type="number" step="0.1" min="0.1" max="20" value="3.0"></label>
+            <label>CaCl₂ concentration (mM)<input id="slicerCalciumMm" type="number" step="5" min="0" max="2000" value="80"></label>
+            <label>Crosslink mode
+              <select id="slicerCrosslinkMode">
+                <option value="post_print" selected>Post-print CaCl₂ treatment</option>
+                <option value="support_bath">CaCl₂ / support bath</option>
+                <option value="manual">Manual / external process</option>
+              </select>
+            </label>
+            <label>Support strategy
+              <select id="slicerSupportStrategy">
+                <option value="self_supporting" selected>Self-supporting geometry</option>
+                <option value="support_bath">Support bath</option>
+                <option value="manual_scaffold">Manual / second-material scaffold</option>
+              </select>
+            </label>
+          </div>
+
+          <p class="eyebrow">Syringe & needle</p>
+          <div class="calibration-form">
+            <label>Syringe capacity (mL)<input id="slicerSyringeCapacity" type="number" step="0.5" min="0.1" max="100" value="10"></label>
+            <label>Syringe inner diameter (mm)<input id="slicerSyringeDiameter" type="number" step="0.01" min="1" max="50" value="14.5"></label>
+            <label>Needle inner diameter (mm)<input id="slicerNeedleDiameter" type="number" step="0.01" min="0.05" max="5" value="0.60"></label>
+            <label>Extrusion multiplier<input id="slicerExtrusionMultiplier" type="number" step="0.05" min="0.1" max="5" value="1.00"></label>
+          </div>
+
+          <p class="eyebrow">Geometry & motion</p>
+          <div class="calibration-form">
+            <label>Layer height (mm)<input id="slicerLayerHeight" type="number" step="0.05" min="0.05" max="5" value="0.30"></label>
             <label>Bead / line width (mm)<input id="slicerBeadWidth" type="number" step="0.05" min="0.05" max="10" value="0.80"></label>
             <label>Infill (%)<input id="slicerInfill" type="number" step="1" min="0" max="100" value="20"></label>
-            <label>Syringe inner diameter (mm)<input id="slicerSyringeDiameter" type="number" step="0.01" min="1" max="50" value="14.5"></label>
-            <label>Print speed (mm/min)<input id="slicerPrintFeed" type="number" step="10" min="30" max="3000" value="300"></label>
+            <label>Travel Z lift (mm)<input id="slicerTravelLift" type="number" step="0.1" min="0" max="10" value="1.0"></label>
+            <label>Print speed (mm/min)<input id="slicerPrintFeed" type="number" step="10" min="30" max="3000" value="240"></label>
             <label>Travel speed (mm/min)<input id="slicerTravelFeed" type="number" step="10" min="60" max="6000" value="1200"></label>
           </div>
 
-          <p id="slicerMessage" class="muted">Choose an STL. Generated G-code is loaded as the active print plan for preview/monitoring; it is not executed automatically.</p>
-          <div id="slicerSummary" class="detail-list"></div>
+          <p class="eyebrow">Hardware calibration gate</p>
+          <div class="checklist">
+            <label><input id="slicerMotorDirectionVerified" type="checkbox"> Syringe motor direction has been physically verified</label>
+            <label><input id="slicerEstepsCalibrated" type="checkbox"> Syringe E-steps have been experimentally calibrated</label>
+          </div>
+
+          <p id="slicerMessage" class="muted">Choose an STL. Planning and G-code generation do not execute the printer.</p>
+
+          <div class="grid two">
+            <div>
+              <p class="eyebrow">Slice summary</p>
+              <div id="slicerSummary" class="detail-list"></div>
+            </div>
+            <div>
+              <div class="card-title">
+                <div>
+                  <p class="eyebrow">Physical print preflight</p>
+                  <h3 id="slicerPreflightTitle">Not evaluated</h3>
+                </div>
+                <span id="slicerPreflightBadge" class="pill">WAITING</span>
+              </div>
+              <div id="slicerPreflight" class="detail-list"></div>
+              <div id="slicerAdvisories" class="detail-list"></div>
+            </div>
+          </div>
+
           <div class="slicer-preview-wrap">
             <canvas id="slicerPreview" width="720" height="420" aria-label="2D preview of syringe-sliced toolpaths"></canvas>
           </div>
-          <p class="muted">Generated E values are plunger displacement. Do not physically extrude until Enderstruder direction and E-steps are experimentally calibrated.</p>
+          <p class="muted">This planner intentionally does not generate ordinary FDM-style removable supports from the same alginate syringe. Unsupported geometry is measured and must be addressed with self-supporting design, a support bath, or a separate/manual scaffold strategy.</p>
         </article>
 
         <article class="card">

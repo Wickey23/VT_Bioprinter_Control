@@ -509,6 +509,31 @@
         <article class="card">
           <div class="card-title">
             <div>
+              <p class="eyebrow">Enderstruder mechanics</p>
+              <h3>Syringe motor calculator</h3>
+            </div>
+            <span class="pill">THEORETICAL</span>
+          </div>
+          <p>Convert a requested syringe volume into plunger travel, motor revolutions, microsteps, and Marlin E motion. Defaults match the 10 mL BD / 4:1 / M8×1.25 Enderstruder configuration.</p>
+          <div class="calibration-form">
+            <label>Syringe inner diameter (mm)<input id="syringeDiameter" type="number" step="0.01" min="1" value="14.5"></label>
+            <label>Gear ratio motor:lead screw<input id="syringeGearRatio" type="number" step="0.1" min="0.1" value="4"></label>
+            <label>Lead screw pitch (mm/rev)<input id="syringeLeadPitch" type="number" step="0.01" min="0.01" value="1.25"></label>
+            <label>Motor full steps/rev<input id="syringeMotorSteps" type="number" step="1" min="1" value="200"></label>
+            <label>Microsteps<input id="syringeMicrosteps" type="number" step="1" min="1" value="16"></label>
+            <label>Requested volume (mL)<input id="syringeVolume" type="number" step="0.01" min="0" value="0.10"></label>
+            <label>Optional print path length (mm)<input id="syringePathLength" type="number" step="0.1" min="0" value="40"></label>
+          </div>
+          <div class="locked-controls">
+            <button id="calculateSyringeMotion" class="primary">Calculate syringe motion</button>
+          </div>
+          <div id="syringeMotionResults" class="detail-list"></div>
+          <p class="muted">The theoretical E-steps/mm must still be experimentally calibrated before printing. The E value here represents plunger travel in millimeters when Marlin is configured to that calibrated E-steps/mm.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
               <p class="eyebrow">Vision comparison</p>
               <h3>Expected path overlay</h3>
             </div>

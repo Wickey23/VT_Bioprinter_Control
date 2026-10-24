@@ -1672,14 +1672,59 @@ async function scan(){
 async function saved(){
   const d=await api("/api/network/saved");
   $("savedNetworks").innerHTML=d.connections.map(n=>
-    '<div class="saved-item"><span>'+esc(n)+'</span><button data-n="'+esc(n)+'">Forget</button></div>'
+    '<div class="saved-item">'+
+      '<div class="wifi-meta"><strong>'+esc(n.name)+(n.active?" ✓":"")+'</strong>'+
+      '<small>Autoconnect '+(n.autoconnect?"on":"off")+' · Priority '+Number(n.priority||0)+'</small></div>'+
+      '<div class="locked-controls">'+
+        '<input class="wifi-priority" data-n="'+esc(n.name)+'" type="number" min="-999" max="999" step="10" value="'+Number(n.priority||0)+'" aria-label="Priority for '+esc(n.name)+'">'+
+        '<button class="secondary wifi-save-priority" data-n="'+esc(n.name)+'">Save priority</button>'+
+        '<button class="secondary wifi-activate" data-n="'+esc(n.name)+'" '+(n.active?"disabled":"")+'>Use now</button>'+
+        '<button class="danger-outline wifi-forget" data-n="'+esc(n.name)+'">Forget</button>'+
+      '</div>'+
+    '</div>'
   ).join("")||'<p class="muted">No saved Wi-Fi profiles.</p>';
-  $("savedNetworks").querySelectorAll("button").forEach(b=>b.onclick=async()=>{
+
+  $("savedNetworks").querySelectorAll(".wifi-save-priority").forEach(b=>b.onclick=async()=>{
+    const input=$("savedNetworks").querySelector('.wifi-priority[data-n="'+CSS.escape(b.dataset.n)+'"]');
+    const priority=Number(input?.value);
+    if(!Number.isInteger(priority)||priority<-999||priority>999)return;
+    b.disabled=true;
+    try{
+      await api("/api/network/priority",{method:"POST",body:JSON.stringify({connection:b.dataset.n,priority})});
+      await saved();
+    }catch(err){
+      alert("Unable to set Wi-Fi priority: "+err.message);
+      b.disabled=false;
+    }
+  });
+
+  $("savedNetworks").querySelectorAll(".wifi-activate").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Switch the Raspberry Pi to "+b.dataset.n+" now? This page may briefly disconnect."))return;
+    try{
+      await api("/api/network/activate",{method:"POST",body:JSON.stringify({connection:b.dataset.n})});
+    }catch(err){
+      if(!String(err.message).includes("Failed to fetch"))alert(err.message);
+    }
+  });
+
+  $("savedNetworks").querySelectorAll(".wifi-forget").forEach(b=>b.onclick=async()=>{
     if(confirm("Forget "+b.dataset.n+"?")){
       await api("/api/network/forget",{method:"POST",body:JSON.stringify({connection:b.dataset.n})});
       saved();
     }
   });
+}
+
+async function remoteAccess(){
+  const d=await api("/api/network/remote");
+  pill($("remoteAccessBadge"),d.active,d.active?"ONLINE":(d.configured?"OFFLINE":"NOT CONFIGURED"));
+  $("remoteAccessUrl").textContent=d.public_url||"Not configured";
+  $("remoteAccessService").textContent=d.service||"cloudflared.service";
+  $("remoteAccessMessage").textContent=d.active
+    ?"Remote HTTPS access is active. The Pi keeps this tunnel alive whenever it has Internet connectivity."
+    :d.configured
+      ?"Remote access is configured but the tunnel service is not currently active."
+      :"Run the one-time Cloudflare Tunnel setup on the Pi, then this page will show the public controller URL.";
 }
 
 function activatePage(page){
@@ -1700,7 +1745,7 @@ function activatePage(page){
   $("page-"+page).classList.add("active");
   $("pageTitle").textContent=page[0].toUpperCase()+page.slice(1);
 
-  if(page==="network"){saved().catch(()=>{});hotspot().catch(()=>{})}
+  if(page==="network"){saved().catch(()=>{});hotspot().catch(()=>{});remoteAccess().catch(()=>{})}
   if(page==="printer"){printer().catch(()=>{});loadCommissioning().catch(()=>{})}
   if(page==="camera"){camera().catch(()=>{})}
   if(page==="calibration"){loadCalibration().catch(()=>{})}
@@ -1798,6 +1843,7 @@ $("refreshAll").onclick=()=>{
   printer().catch(()=>{});
   camera().catch(()=>{});
   hotspot().catch(()=>{});
+  remoteAccess().catch(()=>{});
 };
 
 $("cancelWifi").onclick=()=>$("wifiDialog").close();

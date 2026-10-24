@@ -28,6 +28,7 @@ class PrintRunner:
         self._pause = threading.Event()
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
+        self._port: serial.Serial | None = None
         self._state: dict[str, Any] = self._idle_state()
 
     @staticmethod
@@ -148,6 +149,25 @@ class PrintRunner:
             self._state["paused"] = False
         return self.status()
 
+    def emergency_stop(self) -> bool:
+        """Send Marlin M112 through the already-open print serial session."""
+        with self._lock:
+            port = self._port
+            running = bool(self._state["running"])
+        if not running or port is None:
+            return False
+        try:
+            port.write(b"M112\n")
+            port.flush()
+        finally:
+            self._cancel.set()
+            self._pause.clear()
+            with self._lock:
+                self._state["state"] = "EMERGENCY_STOP"
+                self._state["stop_requested"] = True
+                self._state["paused"] = False
+        return True
+
     @staticmethod
     def _command_code(raw: str) -> str | None:
         code = raw.split(";", 1)[0].strip()
@@ -243,6 +263,8 @@ class PrintRunner:
         try:
             with serial_lock:
                 with serial.Serial(device, baud, timeout=0.25, exclusive=True) as port:
+                    with self._lock:
+                        self._port = port
                     time.sleep(1.0)
                     port.reset_input_buffer()
                     port.write(b"\n")
@@ -316,6 +338,7 @@ class PrintRunner:
                 self._state["error"] = str(exc)
         finally:
             with self._lock:
+                self._port = None
                 self._state["running"] = False
                 self._state["paused"] = False
                 self._state["current_command"] = None

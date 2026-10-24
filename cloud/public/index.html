@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>VT Bioprinter Cloud</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <div class="mark">VT</div>
+        <div><strong>Bioprinter</strong><span>Cloud Control</span></div>
+      </div>
+      <nav>
+        <button class="active">Dashboard</button>
+        <button disabled>Printer</button>
+        <button disabled>Camera</button>
+        <button disabled>Calibration</button>
+        <button disabled>Monitor</button>
+        <button disabled>Print</button>
+        <button disabled>Experiments</button>
+        <button disabled>Analytics</button>
+      </nav>
+      <div class="footer"><span id="dot" class="dot"></span><span id="footerText">Checking cloud…</span></div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Virginia Tech Research Controller</p>
+          <h1>Bioprinter Cloud</h1>
+        </div>
+        <button id="refresh" class="ghost">Refresh</button>
+      </header>
+
+      <section class="hero">
+        <div>
+          <span class="status-label">REMOTE CONTROL PLATFORM</span>
+          <h2 id="heroTitle">Checking deployment…</h2>
+          <p id="heroText">Connecting to the Vercel cloud service.</p>
+        </div>
+        <span id="heroBadge" class="pill">CHECKING</span>
+      </section>
+
+      <section class="grid four">
+        <article class="card metric"><span>Cloud</span><strong id="cloudState">—</strong><small>Vercel deployment</small></article>
+        <article class="card metric"><span>Raspberry Pi</span><strong id="piState">—</strong><small id="piName">Not paired</small></article>
+        <article class="card metric"><span>Printer</span><strong id="printerState">—</strong><small>Creality controller</small></article>
+        <article class="card metric"><span>D405</span><strong id="cameraState">—</strong><small>Depth camera</small></article>
+      </section>
+
+      <section class="grid two">
+        <article class="card">
+          <p class="eyebrow">Architecture</p>
+          <h3>Cloud dashboard ↔ Raspberry Pi</h3>
+          <div class="flow">
+            <strong>Browser</strong><span>→</span><strong>Vercel</strong><span>→</span><strong>Secure device session</strong><span>→</span><strong>Raspberry Pi</strong><span>→</span><strong>Printer + D405</strong>
+          </div>
+          <p class="muted">Vercel hosts the public interface. Hardware access remains on the Raspberry Pi. The Pi will connect outward to the cloud; Vercel never attempts to access /dev/ttyUSB0 or local USB hardware directly.</p>
+        </article>
+
+        <article class="card">
+          <p class="eyebrow">Device pairing</p>
+          <h3 id="pairTitle">Pi relay not paired</h3>
+          <p id="pairMessage" class="muted">This is expected for the first deployment. The next integration step will pair the Raspberry Pi to this site and enable the existing printer, camera, slicer, and monitoring controls remotely.</p>
+          <div class="notice">Local control at <code>vt-3dprinter.local:8080</code> remains the fallback even after cloud pairing.</div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

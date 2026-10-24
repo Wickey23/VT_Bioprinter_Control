@@ -1107,6 +1107,34 @@ function bytesToBase64(buffer){
   return btoa(binary);
 }
 
+function renderSlicerPreflight(preflight, advisories=[]){
+  const badge=$("slicerPreflightBadge");
+  const title=$("slicerPreflightTitle");
+  const list=$("slicerPreflight");
+  const adv=$("slicerAdvisories");
+  if(!preflight){
+    badge.textContent="WAITING";
+    badge.className="pill";
+    title.textContent="Not evaluated";
+    list.innerHTML="";
+    adv.innerHTML="";
+    return;
+  }
+
+  const ready=!!preflight.ready_for_physical_print;
+  badge.textContent=ready?"READY":"BLOCKED";
+  badge.className="pill "+(ready?"ok":"bad");
+  title.textContent=ready?"Ready for physical print":"Resolve blocking checks";
+
+  list.innerHTML=(preflight.checks||[]).map(item=>
+    "<div><span>"+esc(item.name)+"</span><strong>"+(item.ok?"PASS":"BLOCK")+"</strong><small>"+esc(item.message||"")+"</small></div>"
+  ).join("");
+
+  adv.innerHTML=(advisories||[]).map(item=>
+    "<div><span>"+esc((item.level||"note").toUpperCase())+"</span><strong>"+esc(item.code||"process")+"</strong><small>"+esc(item.message||"")+"</small></div>"
+  ).join("");
+}
+
 async function sliceStlForSyringe(){
   const file=$("slicerStlFile").files?.[0];
   if(!file){
@@ -1122,10 +1150,20 @@ async function sliceStlForSyringe(){
   const beadWidth=Number($("slicerBeadWidth").value);
   const infill=Number($("slicerInfill").value);
   const syringeDiameter=Number($("slicerSyringeDiameter").value);
+  const syringeCapacity=Number($("slicerSyringeCapacity").value);
+  const needleDiameter=Number($("slicerNeedleDiameter").value);
+  const alginatePercent=Number($("slicerAlginatePercent").value);
+  const calciumMm=Number($("slicerCalciumMm").value);
+  const extrusionMultiplier=Number($("slicerExtrusionMultiplier").value);
+  const travelLift=Number($("slicerTravelLift").value);
+  const crosslinkMode=$("slicerCrosslinkMode").value;
+  const supportStrategy=$("slicerSupportStrategy").value;
   const printFeed=Number($("slicerPrintFeed").value);
   const travelFeed=Number($("slicerTravelFeed").value);
+  const eStepsCalibrated=$("slicerEstepsCalibrated").checked;
+  const motorDirectionVerified=$("slicerMotorDirectionVerified").checked;
 
-  const values=[layerHeight,beadWidth,infill,syringeDiameter,printFeed,travelFeed];
+  const values=[layerHeight,beadWidth,infill,syringeDiameter,syringeCapacity,needleDiameter,alginatePercent,calciumMm,extrusionMultiplier,travelLift,printFeed,travelFeed];
   if(values.some(v=>!Number.isFinite(v))){
     $("slicerMessage").textContent="Enter valid numeric slicer settings.";
     return;
@@ -1146,8 +1184,18 @@ async function sliceStlForSyringe(){
         bead_width_mm:beadWidth,
         infill_percent:infill,
         syringe_diameter_mm:syringeDiameter,
+        syringe_capacity_ml:syringeCapacity,
+        needle_inner_diameter_mm:needleDiameter,
+        alginate_percent_wv:alginatePercent,
+        calcium_chloride_mM:calciumMm,
+        crosslink_mode:crosslinkMode,
+        support_strategy:supportStrategy,
+        extrusion_multiplier:extrusionMultiplier,
+        travel_lift_mm:travelLift,
         print_feed_mm_min:Math.round(printFeed),
-        travel_feed_mm_min:Math.round(travelFeed)
+        travel_feed_mm_min:Math.round(travelFeed),
+        e_steps_calibrated:eStepsCalibrated,
+        motor_direction_verified:motorDirectionVerified
       })
     });
 
@@ -1165,17 +1213,25 @@ async function sliceStlForSyringe(){
       ["Generated layers",s.generated_layers??"—"],
       ["Contour segments",s.contour_segments??"—"],
       ["Infill segments",s.infill_segments??"—"],
+      ["Alginate",s.material_profile?.alginate_percent_wv==null?"—":Number(s.material_profile.alginate_percent_wv).toFixed(1)+"% w/v"],
+      ["Crosslinking",s.crosslink_mode||"—"],
+      ["Support strategy",s.support_strategy||"—"],
+      ["Unsupported path",s.unsupported_path_ratio==null?"—":(Number(s.unsupported_path_ratio)*100).toFixed(1)+"%"],
       ["E per XY mm",s.e_per_xy_mm==null?"—":Number(s.e_per_xy_mm).toFixed(8)+" mm plunger/mm"],
       ["Estimated plunger travel",s.estimated_plunger_travel_mm==null?"—":Number(s.estimated_plunger_travel_mm).toFixed(4)+" mm"],
       ["Estimated deposited volume",s.estimated_volume_ml==null?"—":Number(s.estimated_volume_ml).toFixed(4)+" mL"]
     ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 
+    renderSlicerPreflight(d.preflight||s.preflight,d.advisories||s.process_advisories||[]);
     $("downloadSlicedGcode").disabled=false;
-    $("slicerMessage").textContent="Slice complete. The generated syringe G-code is now the active preview plan; nothing has been executed.";
+    $("slicerMessage").textContent=(d.preflight?.ready_for_physical_print
+      ?"Plan complete and preflight passed. G-code is generated but still not auto-executed."
+      :"Plan complete. G-code is generated for preview, but physical printing is blocked by preflight items.");
   }catch(err){
     state.slicedGcode=null;
     state.slicedFilename=null;
     $("slicerSummary").innerHTML="";
+    renderSlicerPreflight(null,[]);
     drawSlicerPreview(null);
     $("slicerMessage").textContent="Slice failed: "+err.message;
   }finally{

@@ -779,12 +779,30 @@
             <div class="card-title">
               <div>
                 <p class="eyebrow">Saved profiles</p>
-                <h3>Known networks</h3>
+                <h3>Known networks & fallback order</h3>
               </div>
             </div>
+            <p class="muted">Higher priority networks are preferred. If one is unavailable, NetworkManager can automatically try the next saved profile.</p>
             <div id="savedNetworks" class="saved-list"></div>
           </article>
         </div>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <p class="eyebrow">Internet access</p>
+              <h3>Remote controller website</h3>
+            </div>
+            <span id="remoteAccessBadge" class="pill">CHECKING</span>
+          </div>
+          <div class="detail-list">
+            <div><span>Public URL</span><strong id="remoteAccessUrl">Not configured</strong></div>
+            <div><span>Tunnel service</span><strong id="remoteAccessService">cloudflared.service</strong></div>
+            <div><span>Connection model</span><strong>Pi → outbound tunnel → website</strong></div>
+          </div>
+          <div class="notice">The printer web app can be reached through a stable HTTPS hostname without opening port 8080 on the router. Keep the existing controller access key, and protect the public hostname with an identity/access policy as an additional layer.</div>
+          <p id="remoteAccessMessage" class="muted">One-time tunnel setup is required before this becomes active.</p>
+        </article>
 
         <article class="card">
           <div class="card-title">

@@ -23,7 +23,9 @@ const state={
   printerProjectedPixel:null,
   trackedNozzle:null,
   qualityResult:null,
-  qualityObjectUrl:null
+  qualityObjectUrl:null,
+  slicedGcode:null,
+  slicedFilename:null
 };
 
 async function api(path,opts={}){
@@ -1034,12 +1036,171 @@ async function analyzeMonitorSurface(){
 }
 
 
+
+function drawSlicerPreview(plan){
+  const canvas=$("slicerPreview");
+  if(!canvas)return;
+  const ctx=canvas.getContext("2d");
+  const width=canvas.width;
+  const height=canvas.height;
+  ctx.clearRect(0,0,width,height);
+  ctx.fillStyle="#0b1220";
+  ctx.fillRect(0,0,width,height);
+
+  if(!plan?.segments?.length){
+    ctx.fillStyle="#94a3b8";
+    ctx.font="16px sans-serif";
+    ctx.fillText("Slice an STL to preview syringe toolpaths.",24,36);
+    return;
+  }
+
+  const segments=plan.segments.filter(s=>s.extruding);
+  if(!segments.length){
+    ctx.fillStyle="#94a3b8";
+    ctx.font="16px sans-serif";
+    ctx.fillText("No extruding syringe paths in this plan.",24,36);
+    return;
+  }
+
+  const min=plan.bounds_mm?.min||[0,0,0];
+  const max=plan.bounds_mm?.max||[220,220,0];
+  const dx=Math.max(1e-6,Number(max[0])-Number(min[0]));
+  const dy=Math.max(1e-6,Number(max[1])-Number(min[1]));
+  const pad=28;
+  const scale=Math.min((width-pad*2)/dx,(height-pad*2)/dy);
+  const ox=(width-dx*scale)/2-Number(min[0])*scale;
+  const oy=(height-dy*scale)/2+Number(max[1])*scale;
+
+  const layers=[...new Set(segments.map(s=>Number(s.layer)||0))].sort((a,b)=>a-b);
+  const minLayer=layers[0]||0;
+  const maxLayer=layers[layers.length-1]||minLayer;
+  const layerSpan=Math.max(1,maxLayer-minLayer);
+
+  for(const s of segments){
+    const t=((Number(s.layer)||0)-minLayer)/layerSpan;
+    const hue=190+Math.round(95*t);
+    ctx.strokeStyle="hsl("+hue+" 80% 60%)";
+    ctx.lineWidth=1.7;
+    ctx.beginPath();
+    ctx.moveTo(ox+Number(s.start[0])*scale,oy-Number(s.start[1])*scale);
+    ctx.lineTo(ox+Number(s.end[0])*scale,oy-Number(s.end[1])*scale);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle="#475569";
+  ctx.lineWidth=1;
+  ctx.strokeRect(pad,pad,width-pad*2,height-pad*2);
+  ctx.fillStyle="#cbd5e1";
+  ctx.font="13px sans-serif";
+  ctx.fillText("Top view · extrusion paths · "+layers.length+" layer(s)",pad,18);
+}
+
+function bytesToBase64(buffer){
+  const bytes=new Uint8Array(buffer);
+  let binary="";
+  const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){
+    binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+  }
+  return btoa(binary);
+}
+
+async function sliceStlForSyringe(){
+  const file=$("slicerStlFile").files?.[0];
+  if(!file){
+    $("slicerMessage").textContent="Choose an STL file first.";
+    return;
+  }
+  if(file.size>12*1024*1024){
+    $("slicerMessage").textContent="STL exceeds the 12 MB Raspberry Pi slicer limit.";
+    return;
+  }
+
+  const layerHeight=Number($("slicerLayerHeight").value);
+  const beadWidth=Number($("slicerBeadWidth").value);
+  const infill=Number($("slicerInfill").value);
+  const syringeDiameter=Number($("slicerSyringeDiameter").value);
+  const printFeed=Number($("slicerPrintFeed").value);
+  const travelFeed=Number($("slicerTravelFeed").value);
+
+  const values=[layerHeight,beadWidth,infill,syringeDiameter,printFeed,travelFeed];
+  if(values.some(v=>!Number.isFinite(v))){
+    $("slicerMessage").textContent="Enter valid numeric slicer settings.";
+    return;
+  }
+
+  $("sliceStl").disabled=true;
+  $("downloadSlicedGcode").disabled=true;
+  $("slicerMessage").textContent="Slicing "+file.name+" for syringe extrusion…";
+
+  try{
+    const buffer=await file.arrayBuffer();
+    const d=await api("/api/slicer/stl",{
+      method:"POST",
+      body:JSON.stringify({
+        filename:file.name,
+        stl_base64:bytesToBase64(buffer),
+        layer_height_mm:layerHeight,
+        bead_width_mm:beadWidth,
+        infill_percent:infill,
+        syringe_diameter_mm:syringeDiameter,
+        print_feed_mm_min:Math.round(printFeed),
+        travel_feed_mm_min:Math.round(travelFeed)
+      })
+    });
+
+    state.slicedGcode=d.gcode;
+    state.slicedFilename=d.filename;
+    renderPlan(d.plan);
+    drawSlicerPreview(d.plan);
+    if(state.calibrationProfile)await loadProjectedPlan().catch(()=>{});
+
+    const s=d.summary||{};
+    $("slicerSummary").innerHTML=[
+      ["Output",d.filename||"—"],
+      ["Model size",(s.model_size_mm||[]).map(v=>Number(v).toFixed(2)).join(" × ")+" mm"],
+      ["Triangles",s.triangle_count??"—"],
+      ["Generated layers",s.generated_layers??"—"],
+      ["Contour segments",s.contour_segments??"—"],
+      ["Infill segments",s.infill_segments??"—"],
+      ["E per XY mm",s.e_per_xy_mm==null?"—":Number(s.e_per_xy_mm).toFixed(8)+" mm plunger/mm"],
+      ["Estimated plunger travel",s.estimated_plunger_travel_mm==null?"—":Number(s.estimated_plunger_travel_mm).toFixed(4)+" mm"],
+      ["Estimated deposited volume",s.estimated_volume_ml==null?"—":Number(s.estimated_volume_ml).toFixed(4)+" mL"]
+    ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
+
+    $("downloadSlicedGcode").disabled=false;
+    $("slicerMessage").textContent="Slice complete. The generated syringe G-code is now the active preview plan; nothing has been executed.";
+  }catch(err){
+    state.slicedGcode=null;
+    state.slicedFilename=null;
+    $("slicerSummary").innerHTML="";
+    drawSlicerPreview(null);
+    $("slicerMessage").textContent="Slice failed: "+err.message;
+  }finally{
+    $("sliceStl").disabled=false;
+  }
+}
+
+function downloadSlicedGcode(){
+  if(!state.slicedGcode||!state.slicedFilename)return;
+  const blob=new Blob([state.slicedGcode],{type:"text/plain;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=state.slicedFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
 function renderPlan(plan){
   state.planSummary=plan||null;
   const loaded=!!plan;
   pill($("planBadge"),loaded,loaded?"PLAN LOADED":"NO PLAN");
 
   if(!loaded){
+    drawSlicerPreview(null);
     $("planDetails").innerHTML='<div><span>Status</span><strong>No G-code loaded</strong></div>';
     $("planMessage").textContent="No print plan loaded.";
     state.projectedPlan=null;
@@ -1063,6 +1224,7 @@ function renderPlan(plan){
   ].map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 
   $("planMessage").textContent="Plan parsed. It will appear as the expected extrusion path in Monitor after camera calibration.";
+  drawSlicerPreview(plan);
   updateAnalyticsReadiness();
 }
 
@@ -1503,6 +1665,8 @@ $("monitorCanvas").onclick=e=>monitorCanvasClick(e);
 
 $("loadGcode").onclick=()=>loadGcodeFile();
 $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
+$("sliceStl").onclick=()=>sliceStlForSyringe();
+$("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
 $("calculateSyringeMotion").onclick=()=>calculateSyringeMotion();
 
 $("startExperiment").onclick=()=>startExperimentSession();
@@ -1578,6 +1742,7 @@ $("loginForm").onsubmit=async e=>{
     }catch{}
   }
   calculateSyringeMotion();
+  drawSlicerPreview(state.planSummary);
   setInterval(()=>{if(state.token)status().catch(()=>{})},10000);
 })();
 

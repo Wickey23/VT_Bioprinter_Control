@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import struct
 import time
 from pathlib import Path
 from typing import Any
@@ -204,6 +205,346 @@ def parse_gcode(text: str, filename: str = "print.gcode") -> dict[str, Any]:
         "segments": segments,
     }
     return save_plan(plan)
+
+
+
+def _parse_stl_triangles(data: bytes) -> np.ndarray:
+    """Parse binary or ASCII STL bytes into an (N, 3, 3) float array."""
+    if len(data) < 15:
+        raise ValueError("STL file is too small.")
+
+    # Binary STL has an 80-byte header, uint32 triangle count, then 50 bytes/triangle.
+    if len(data) >= 84:
+        count = struct.unpack_from("<I", data, 80)[0]
+        expected = 84 + count * 50
+        if count > 0 and expected == len(data):
+            triangles = np.empty((count, 3, 3), dtype=float)
+            offset = 84
+            for i in range(count):
+                values = struct.unpack_from("<12fH", data, offset)
+                triangles[i] = np.asarray(values[3:12], dtype=float).reshape(3, 3)
+                offset += 50
+            return triangles
+
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError("STL is neither valid binary STL nor UTF-8 ASCII STL.") from exc
+
+    vertices: list[list[float]] = []
+    for raw in text.splitlines():
+        parts = raw.strip().split()
+        if len(parts) == 4 and parts[0].lower() == "vertex":
+            try:
+                vertices.append([float(parts[1]), float(parts[2]), float(parts[3])])
+            except ValueError:
+                continue
+    if len(vertices) < 3 or len(vertices) % 3:
+        raise ValueError("ASCII STL did not contain complete triangle vertices.")
+    return np.asarray(vertices, dtype=float).reshape(-1, 3, 3)
+
+
+def _triangle_plane_segment(triangle: np.ndarray, z: float, eps: float = 1e-7) -> tuple[np.ndarray, np.ndarray] | None:
+    points: list[np.ndarray] = []
+    for i, j in ((0, 1), (1, 2), (2, 0)):
+        a = triangle[i]
+        b = triangle[j]
+        da = float(a[2] - z)
+        db = float(b[2] - z)
+
+        if abs(da) <= eps and abs(db) <= eps:
+            # Coplanar edges are ignored; neighboring triangles provide the
+            # contour at ordinary layer planes.
+            continue
+        if abs(da) <= eps:
+            points.append(a[:2].copy())
+            continue
+        if abs(db) <= eps:
+            points.append(b[:2].copy())
+            continue
+        if da * db < 0:
+            t = da / (da - db)
+            points.append((a[:2] + t * (b[:2] - a[:2])).copy())
+
+    unique: list[np.ndarray] = []
+    for point in points:
+        if not any(float(np.linalg.norm(point - old)) < 1e-6 for old in unique):
+            unique.append(point)
+    if len(unique) != 2:
+        return None
+    if float(np.linalg.norm(unique[1] - unique[0])) < 1e-6:
+        return None
+    return unique[0], unique[1]
+
+
+def _stitch_segments(
+    segments: list[tuple[np.ndarray, np.ndarray]],
+    *,
+    tolerance_mm: float = 0.08,
+) -> list[list[np.ndarray]]:
+    remaining = [(a.copy(), b.copy()) for a, b in segments]
+    paths: list[list[np.ndarray]] = []
+
+    while remaining:
+        a, b = remaining.pop()
+        path = [a, b]
+        changed = True
+        while changed and remaining:
+            changed = False
+            end = path[-1]
+            start = path[0]
+            for idx, (p, q) in enumerate(remaining):
+                if float(np.linalg.norm(end - p)) <= tolerance_mm:
+                    path.append(q)
+                elif float(np.linalg.norm(end - q)) <= tolerance_mm:
+                    path.append(p)
+                elif float(np.linalg.norm(start - q)) <= tolerance_mm:
+                    path.insert(0, p)
+                elif float(np.linalg.norm(start - p)) <= tolerance_mm:
+                    path.insert(0, q)
+                else:
+                    continue
+                remaining.pop(idx)
+                changed = True
+                break
+
+        if len(path) >= 3 and float(np.linalg.norm(path[-1] - path[0])) <= tolerance_mm:
+            path[-1] = path[0].copy()
+        paths.append(path)
+
+    return paths
+
+
+def _hatch_segments(
+    paths: list[list[np.ndarray]],
+    *,
+    horizontal: bool,
+    spacing_mm: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    edges: list[tuple[np.ndarray, np.ndarray]] = []
+    for path in paths:
+        if len(path) < 3:
+            continue
+        closed = path
+        if float(np.linalg.norm(path[-1] - path[0])) > 0.1:
+            closed = path + [path[0]]
+        edges.extend((closed[i], closed[i + 1]) for i in range(len(closed) - 1))
+
+    if not edges:
+        return []
+
+    coords = [float(point[1] if horizontal else point[0]) for edge in edges for point in edge]
+    lo, hi = min(coords), max(coords)
+    if hi - lo < spacing_mm:
+        return []
+
+    result: list[tuple[np.ndarray, np.ndarray]] = []
+    cursor = lo + spacing_mm
+    while cursor < hi - 1e-6:
+        crossings: list[float] = []
+        for a, b in edges:
+            primary_a = float(a[1] if horizontal else a[0])
+            primary_b = float(b[1] if horizontal else b[0])
+            if abs(primary_b - primary_a) < 1e-9:
+                continue
+            # Half-open crossing rule avoids double-counting polygon vertices.
+            if not ((primary_a <= cursor < primary_b) or (primary_b <= cursor < primary_a)):
+                continue
+            t = (cursor - primary_a) / (primary_b - primary_a)
+            secondary_a = float(a[0] if horizontal else a[1])
+            secondary_b = float(b[0] if horizontal else b[1])
+            crossings.append(secondary_a + t * (secondary_b - secondary_a))
+
+        crossings.sort()
+        for i in range(0, len(crossings) - 1, 2):
+            p0, p1 = crossings[i], crossings[i + 1]
+            if p1 - p0 < 0.05:
+                continue
+            if horizontal:
+                result.append((np.asarray([p0, cursor]), np.asarray([p1, cursor])))
+            else:
+                result.append((np.asarray([cursor, p0]), np.asarray([cursor, p1])))
+        cursor += spacing_mm
+    return result
+
+
+def slice_stl_to_syringe_gcode(
+    stl_data: bytes,
+    *,
+    filename: str,
+    layer_height_mm: float = 0.5,
+    bead_width_mm: float = 0.8,
+    infill_percent: float = 20.0,
+    syringe_diameter_mm: float = 14.5,
+    print_feed_mm_min: int = 300,
+    travel_feed_mm_min: int = 1200,
+    bed_center_x_mm: float = 110.0,
+    bed_center_y_mm: float = 110.0,
+) -> dict[str, Any]:
+    if not (0.05 <= layer_height_mm <= 5.0):
+        raise ValueError("Layer height must be between 0.05 and 5 mm.")
+    if not (0.05 <= bead_width_mm <= 10.0):
+        raise ValueError("Bead width must be between 0.05 and 10 mm.")
+    if not (0.0 <= infill_percent <= 100.0):
+        raise ValueError("Infill must be between 0 and 100%.")
+    if not (1.0 <= syringe_diameter_mm <= 50.0):
+        raise ValueError("Syringe inner diameter must be between 1 and 50 mm.")
+
+    triangles = _parse_stl_triangles(stl_data)
+    if triangles.shape[0] > 300_000:
+        raise ValueError("STL has too many triangles for the Raspberry Pi slicer.")
+
+    points = triangles.reshape(-1, 3)
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    size = maxs - mins
+    if float(size[0]) > 180 or float(size[1]) > 180:
+        raise ValueError("Model exceeds the conservative 180 × 180 mm slicer workspace.")
+    if float(size[2]) <= 0 or float(size[2]) > 230:
+        raise ValueError("Model Z height must be greater than 0 and at most 230 mm.")
+
+    # Center XY on the nominal Ender-3 V2 bed and place the model bottom at Z=0.
+    offset = np.asarray(
+        [
+            bed_center_x_mm - float((mins[0] + maxs[0]) / 2.0),
+            bed_center_y_mm - float((mins[1] + maxs[1]) / 2.0),
+            -float(mins[2]),
+        ]
+    )
+    triangles = triangles + offset
+
+    max_z = float(size[2])
+    layer_count = max(1, int(math.ceil(max_z / layer_height_mm)))
+    if layer_count > 600:
+        raise ValueError("Too many layers; increase layer height.")
+
+    syringe_area_mm2 = math.pi * (syringe_diameter_mm / 2.0) ** 2
+    e_per_path_mm = bead_width_mm * layer_height_mm / syringe_area_mm2
+    infill_spacing = None
+    if infill_percent > 0:
+        infill_spacing = bead_width_mm / max(infill_percent / 100.0, 0.01)
+        infill_spacing = max(bead_width_mm, infill_spacing)
+
+    lines = [
+        "; VT Bioprinter syringe slicer output",
+        f"; Source: {filename}",
+        "; E is syringe plunger travel in mm, NOT filament length.",
+        "; Verify motor direction and experimentally calibrate E-steps before physical extrusion.",
+        f"; layer_height_mm={layer_height_mm:.4f}",
+        f"; bead_width_mm={bead_width_mm:.4f}",
+        f"; infill_percent={infill_percent:.2f}",
+        f"; syringe_inner_diameter_mm={syringe_diameter_mm:.4f}",
+        f"; e_per_xy_mm={e_per_path_mm:.9f}",
+        "G90",
+        "M83",
+        "M302 S0",
+        "G28",
+        "M400",
+        "G0 Z10 F300",
+    ]
+
+    total_path_mm = 0.0
+    total_e_mm = 0.0
+    generated_layers = 0
+    contour_count = 0
+    infill_count = 0
+
+    for layer_index in range(layer_count):
+        z_model = min(max_z - 1e-5, (layer_index + 1) * layer_height_mm)
+        z = max(layer_height_mm, z_model)
+        raw_segments: list[tuple[np.ndarray, np.ndarray]] = []
+        for triangle in triangles:
+            segment = _triangle_plane_segment(triangle, z)
+            if segment is not None:
+                raw_segments.append(segment)
+        if not raw_segments:
+            continue
+
+        paths = _stitch_segments(raw_segments)
+        usable_paths = [path for path in paths if len(path) >= 2]
+        if not usable_paths:
+            continue
+
+        lines.append(f";LAYER:{generated_layers}")
+        lines.append(f"G0 Z{z:.4f} F300")
+        generated_layers += 1
+
+        def emit_path(path: list[np.ndarray]) -> None:
+            nonlocal total_path_mm, total_e_mm, contour_count
+            start = path[0]
+            lines.append(f"G0 X{float(start[0]):.4f} Y{float(start[1]):.4f} F{travel_feed_mm_min}")
+            for point in path[1:]:
+                prev = start
+                length = float(np.linalg.norm(point - prev))
+                if length <= 1e-6:
+                    start = point
+                    continue
+                e = length * e_per_path_mm
+                lines.append(
+                    f"G1 X{float(point[0]):.4f} Y{float(point[1]):.4f} "
+                    f"E{e:.7f} F{print_feed_mm_min}"
+                )
+                total_path_mm += length
+                total_e_mm += e
+                contour_count += 1
+                start = point
+
+        for path in usable_paths:
+            emit_path(path)
+
+        if infill_spacing is not None:
+            hatch = _hatch_segments(
+                usable_paths,
+                horizontal=(generated_layers % 2 == 1),
+                spacing_mm=infill_spacing,
+            )
+            for a, b in hatch:
+                length = float(np.linalg.norm(b - a))
+                if length <= 1e-6:
+                    continue
+                e = length * e_per_path_mm
+                lines.append(f"G0 X{float(a[0]):.4f} Y{float(a[1]):.4f} F{travel_feed_mm_min}")
+                lines.append(
+                    f"G1 X{float(b[0]):.4f} Y{float(b[1]):.4f} "
+                    f"E{e:.7f} F{print_feed_mm_min}"
+                )
+                total_path_mm += length
+                total_e_mm += e
+                infill_count += 1
+
+    if generated_layers == 0:
+        raise ValueError("No printable STL cross-sections were generated.")
+
+    lines.extend(
+        [
+            "M400",
+            "G0 Z10 F300",
+            f"G0 X{bed_center_x_mm:.3f} Y{bed_center_y_mm:.3f} F{travel_feed_mm_min}",
+            "M400",
+            "M114",
+            "; End syringe-sliced plan",
+        ]
+    )
+    gcode = "\n".join(lines) + "\n"
+    output_name = Path(filename).stem + "_syringe.gcode"
+    plan = parse_gcode(gcode, output_name)
+    plan["slicer"] = {
+        "source_filename": filename,
+        "triangle_count": int(triangles.shape[0]),
+        "model_size_mm": [round(float(v), 4) for v in size],
+        "layer_height_mm": round(layer_height_mm, 5),
+        "bead_width_mm": round(bead_width_mm, 5),
+        "infill_percent": round(infill_percent, 3),
+        "syringe_diameter_mm": round(syringe_diameter_mm, 5),
+        "e_per_xy_mm": round(e_per_path_mm, 9),
+        "generated_layers": generated_layers,
+        "contour_segments": contour_count,
+        "infill_segments": infill_count,
+        "estimated_plunger_travel_mm": round(total_e_mm, 6),
+        "estimated_volume_ml": round(total_e_mm * syringe_area_mm2 / 1000.0, 6),
+    }
+    save_plan(plan)
+    return {"filename": output_name, "gcode": gcode, "plan": plan, "summary": plan["slicer"]}
 
 
 def printer_to_camera(profile: dict[str, Any], printer_xyz_mm: list[float]) -> list[float]:

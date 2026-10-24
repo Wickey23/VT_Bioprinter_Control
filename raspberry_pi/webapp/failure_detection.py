@@ -100,6 +100,16 @@ def evaluate_layer(
     return assessment, quality
 
 
+def save_training_frames(layer: int, rgb_jpeg: bytes, depth_jpeg: bytes) -> tuple[str, str]:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time() * 1000)
+    rgb_path = DATA_DIR / f"layer-{int(layer):04d}-{stamp}-rgb.jpg"
+    depth_path = DATA_DIR / f"layer-{int(layer):04d}-{stamp}-depth.jpg"
+    rgb_path.write_bytes(rgb_jpeg)
+    depth_path.write_bytes(depth_jpeg)
+    return str(rgb_path), str(depth_path)
+
+
 def save_observation(
     *,
     layer: int,

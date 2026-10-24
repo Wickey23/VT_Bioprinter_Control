@@ -125,7 +125,11 @@ async function printer(){
   const rows=p.selected
     ?[["Device",p.selected.device],["Description",p.selected.description],["USB ID",(p.selected.vid||"—")+":"+(p.selected.pid||"—")]]
     :[["Device","—"],["Status","Waiting for Creality/CH340 USB connection"]];
-  rows.push(["Motion",p.commissioning_locked?"Commissioning locked":"Tiny jog tests enabled"]);
+  rows.push(["Motion",p.commissioning_locked?"Commissioning locked":"Jog controls enabled"]);
+  rows.push(["Homed reference",p.motion_reference?.homed?"Known":"Not established"]);
+  if(p.limits_mm){
+    rows.push(["Software limits","X 0–220 · Y 0–220 · Z 0–250 mm"]);
+  }
   $("printerDetails").innerHTML=rows.map(x=>"<div><span>"+esc(x[0])+"</span><strong>"+esc(x[1])+"</strong></div>").join("");
 }
 
@@ -138,9 +142,10 @@ async function loadCommissioning(){
   lockBadge($("commissioningBadge"),c.unlocked);
   lockBadge($("motionBadge"),c.unlocked);
   document.querySelectorAll(".jog-btn").forEach(b=>b.disabled=!c.unlocked);
+  $("homeCenter").disabled=!c.unlocked;
   $("commissioningMessage").textContent=c.unlocked
-    ?"Motion gate is open for 0.1 mm and 1.0 mm X/Y/Z jogs only."
-    :"Complete every checklist item to enable tiny jog tests.";
+    ?"Motion gate is open. Home + Center establishes the reference required for 5/10/25 mm jogs and software travel limits."
+    :"Complete every checklist item to enable motion.";
   return c;
 }
 
@@ -154,7 +159,7 @@ async function saveCommissioning(){
   await printer();
   await status();
   $("commissioningMessage").textContent=c.unlocked
-    ?"Commissioning state saved. Tiny jog controls are now enabled."
+    ?"Commissioning state saved. Motion controls are enabled; use Home + Center before large jogs."
     :"State saved. Motion remains locked until every item is confirmed.";
 }
 
@@ -172,6 +177,31 @@ async function lockMotion(){
   await status();
 }
 
+async function homeCenter(){
+  if(!confirm("Home X/Y/Z, lift to Z=10 mm, then move X/Y to bed center (110,110)? Keep the physical power switch within reach."))return;
+  $("motionLog").textContent="Homing on verified endstops, then moving to center…";
+  $("homeCenter").disabled=true;
+  document.querySelectorAll(".jog-btn").forEach(b=>b.disabled=true);
+  try{
+    const d=await api("/api/printer/home-center",{method:"POST"});
+    const p=d.position_mm||{};
+    $("motionLog").textContent=[
+      "Home + Center complete.",
+      "Position: X "+(p.x??"—")+" · Y "+(p.y??"—")+" · Z "+(p.z??"—")+" mm",
+      "Large jog protection is now active for X 0–220, Y 0–220, Z 0–250 mm.",
+      ...(d.response||[])
+    ].join("\n");
+    await printer();
+  }catch(err){
+    $("motionLog").textContent="ERROR: "+err.message;
+  }finally{
+    if(state.commissioning?.unlocked){
+      $("homeCenter").disabled=false;
+      document.querySelectorAll(".jog-btn").forEach(b=>b.disabled=false);
+    }
+  }
+}
+
 async function jog(axis,sign){
   const step=Number($("jogStep").value);
   const distance=step*Number(sign);
@@ -181,8 +211,13 @@ async function jog(axis,sign){
       method:"POST",
       body:JSON.stringify({axis,distance_mm:distance,feed_mm_min:300})
     });
+    const after=d.position_after_mm;
     $("motionLog").textContent=[
       "Jog complete: "+d.axis+" "+d.distance_mm+" mm @ "+d.feed_mm_min+" mm/min",
+      d.homed_reference&&after
+        ?("Position: X "+after.x+" · Y "+after.y+" · Z "+after.z+" mm")
+        :"Position reference: not homed by this controller session",
+      "Endstops: "+JSON.stringify(d.endstops||{}),
       ...(d.response||[])
     ].join("\n");
   }catch(err){
@@ -1390,6 +1425,7 @@ document.querySelectorAll(".safe-command").forEach(b=>b.onclick=async()=>{
 });
 
 document.querySelectorAll(".jog-btn").forEach(b=>b.onclick=()=>jog(b.dataset.axis,b.dataset.sign));
+$("homeCenter").onclick=()=>homeCenter();
 
 $("saveCommissioning").onclick=()=>saveCommissioning().catch(e=>$("commissioningMessage").textContent=e.message);
 $("lockMotion").onclick=()=>lockMotion().catch(e=>$("commissioningMessage").textContent=e.message);

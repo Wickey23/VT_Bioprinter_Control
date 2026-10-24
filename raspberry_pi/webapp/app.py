@@ -92,7 +92,7 @@ HOTSPOT_PASSWORD = "bioprinter"
 HOTSPOT_IP = "10.42.0.1"
 HOTSPOT_URL = f"http://{HOTSPOT_IP}:8080"
 
-app = FastAPI(title="VT Bioprinter Controller", version="0.4.0")
+app = FastAPI(title="VT Bioprinter Controller", version="0.5.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -724,6 +724,7 @@ def status() -> dict[str, Any]:
     calibration_profile = load_profile()
     active_plan = load_plan()
     experiment = active_experiment()
+    print_state = PRINT_RUNNER.status()
     return {
         "hostname": socket.gethostname(),
         "uptime_seconds": uptime_seconds,
@@ -742,7 +743,9 @@ def status() -> dict[str, Any]:
         },
         "camera": usb_camera_status(),
         "research": {
-            "mode": "OBSERVE",
+            "mode": "MONITORED_PRINT" if print_state.get("running") else "OBSERVE",
+            "print_state": print_state.get("state"),
+            "print_progress_percent": print_state.get("progress_percent"),
             "calibrated": calibration_profile is not None,
             "surface_baseline": bool(calibration_profile and calibration_profile.get("surface_baseline")),
             "plan_loaded": active_plan is not None,

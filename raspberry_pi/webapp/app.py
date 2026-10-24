@@ -674,6 +674,12 @@ def serial_motion(axis: str, distance_mm: float, feed_mm_min: int) -> dict[str, 
 
 
 def emergency_stop() -> dict[str, Any]:
+    if PRINT_RUNNER.emergency_stop():
+        return {
+            "ok": True,
+            "message": "Marlin M112 sent through the active print session. Use the physical power stop for a hardware emergency.",
+        }
+
     target = chosen_printer()
     if not target:
         raise HTTPException(status_code=409, detail="Printer serial interface is not connected.")

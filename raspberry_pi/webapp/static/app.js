@@ -1048,22 +1048,51 @@ function drawSlicerPreview(plan){
   ctx.fillRect(0,0,width,height);
 
   if(!plan?.segments?.length){
+    if($("slicerLayerPreview")){
+      $("slicerLayerPreview").disabled=true;
+      $("slicerLayerPreview").min="0";
+      $("slicerLayerPreview").max="0";
+      $("slicerLayerPreview").value="0";
+      $("slicerLayerPreviewLabel").textContent="All layers";
+    }
     ctx.fillStyle="#94a3b8";
     ctx.font="16px sans-serif";
     ctx.fillText("Slice an STL to preview syringe toolpaths.",24,36);
     return;
   }
 
-  const segments=plan.segments.filter(s=>s.extruding);
-  if(!segments.length){
+  const allSegments=plan.segments.filter(s=>s.extruding);
+  if(!allSegments.length){
     ctx.fillStyle="#94a3b8";
     ctx.font="16px sans-serif";
     ctx.fillText("No extruding syringe paths in this plan.",24,36);
     return;
   }
 
-  const xs=segments.flatMap(s=>[Number(s.start[0]),Number(s.end[0])]);
-  const ys=segments.flatMap(s=>[Number(s.start[1]),Number(s.end[1])]);
+  const layers=[...new Set(allSegments.map(s=>Number(s.layer)||0))].sort((a,b)=>a-b);
+  const slider=$("slicerLayerPreview");
+  const showAll=$("slicerShowAllLayers")?.checked!==false;
+  if(slider){
+    slider.disabled=layers.length<=1||showAll;
+    slider.min=String(layers[0]||0);
+    slider.max=String(layers[layers.length-1]||0);
+    if(Number(slider.value)>Number(slider.max))slider.value=slider.max;
+    if(Number(slider.value)<Number(slider.min))slider.value=slider.min;
+  }
+
+  const selectedLayer=slider?Number(slider.value):(layers[0]||0);
+  const segments=showAll
+    ?allSegments
+    :allSegments.filter(s=>(Number(s.layer)||0)===selectedLayer);
+
+  if($("slicerLayerPreviewLabel")){
+    $("slicerLayerPreviewLabel").textContent=showAll
+      ?("All "+layers.length+" layers")
+      :("Layer "+selectedLayer);
+  }
+
+  const xs=allSegments.flatMap(s=>[Number(s.start[0]),Number(s.end[0])]);
+  const ys=allSegments.flatMap(s=>[Number(s.start[1]),Number(s.end[1])]);
   const min=[Math.min(...xs),Math.min(...ys),0];
   const max=[Math.max(...xs),Math.max(...ys),0];
   const dx=Math.max(1e-6,max[0]-min[0]);
@@ -1073,7 +1102,6 @@ function drawSlicerPreview(plan){
   const ox=(width-dx*scale)/2-Number(min[0])*scale;
   const oy=(height-dy*scale)/2+Number(max[1])*scale;
 
-  const layers=[...new Set(segments.map(s=>Number(s.layer)||0))].sort((a,b)=>a-b);
   const minLayer=layers[0]||0;
   const maxLayer=layers[layers.length-1]||minLayer;
   const layerSpan=Math.max(1,maxLayer-minLayer);
@@ -1082,19 +1110,23 @@ function drawSlicerPreview(plan){
     const t=((Number(s.layer)||0)-minLayer)/layerSpan;
     const hue=190+Math.round(95*t);
     ctx.strokeStyle="hsl("+hue+" 80% 60%)";
-    ctx.lineWidth=1.7;
+    ctx.globalAlpha=showAll?.65:1;
+    ctx.lineWidth=showAll?1.4:2.2;
     ctx.beginPath();
     ctx.moveTo(ox+Number(s.start[0])*scale,oy-Number(s.start[1])*scale);
     ctx.lineTo(ox+Number(s.end[0])*scale,oy-Number(s.end[1])*scale);
     ctx.stroke();
   }
+  ctx.globalAlpha=1;
 
   ctx.strokeStyle="#475569";
   ctx.lineWidth=1;
   ctx.strokeRect(pad,pad,width-pad*2,height-pad*2);
   ctx.fillStyle="#cbd5e1";
   ctx.font="13px sans-serif";
-  ctx.fillText("Top view · extrusion paths · "+layers.length+" layer(s)",pad,18);
+  ctx.fillText(showAll
+    ?("Top view · all extrusion paths · "+layers.length+" layer(s)")
+    :("Top view · layer "+selectedLayer),pad,18);
 }
 
 function bytesToBase64(buffer){
@@ -1201,6 +1233,12 @@ async function sliceStlForSyringe(){
 
     state.slicedGcode=d.gcode;
     state.slicedFilename=d.filename;
+    const maxLayer=Math.max(0,Number(d.summary?.generated_layers||1)-1);
+    if($("slicerLayerPreview")){
+      $("slicerLayerPreview").min="0";
+      $("slicerLayerPreview").max=String(maxLayer);
+      $("slicerLayerPreview").value="0";
+    }
     renderPlan(d.plan);
     drawSlicerPreview(d.plan);
     if(state.calibrationProfile)await loadProjectedPlan().catch(()=>{});
@@ -1276,6 +1314,7 @@ function renderPlan(plan){
     ["Estimated layers",plan.layer_count_estimate],
     ["Motion",Number(plan.total_motion_mm||0).toFixed(1)+" mm"],
     ["Extruding path",Number(plan.extruding_motion_mm||0).toFixed(1)+" mm"],
+    ["Estimated motion time",formatDuration(plan.estimated_time_seconds)],
     ["X range",Number(min[0]).toFixed(1)+" → "+Number(max[0]).toFixed(1)+" mm"],
     ["Y range",Number(min[1]).toFixed(1)+" → "+Number(max[1]).toFixed(1)+" mm"],
     ["Z range",Number(min[2]).toFixed(1)+" → "+Number(max[2]).toFixed(1)+" mm"]
@@ -1725,6 +1764,8 @@ $("loadGcode").onclick=()=>loadGcodeFile();
 $("clearGcode").onclick=()=>clearGcode().catch(e=>$("planMessage").textContent=e.message);
 $("sliceStl").onclick=()=>sliceStlForSyringe();
 $("downloadSlicedGcode").onclick=()=>downloadSlicedGcode();
+$("slicerLayerPreview").oninput=()=>drawSlicerPreview(state.planSummary);
+$("slicerShowAllLayers").onchange=()=>drawSlicerPreview(state.planSummary);
 $("calculateSyringeMotion").onclick=()=>calculateSyringeMotion();
 
 $("startExperiment").onclick=()=>startExperimentSession();

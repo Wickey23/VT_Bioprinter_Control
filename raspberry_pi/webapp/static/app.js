@@ -1580,6 +1580,12 @@ function renderPrintRunner(p){
   $("printProgress").textContent=Number(p.progress_percent||0).toFixed(1)+"%";
   $("printLayer").textContent=p.current_layer==null?"—":String(Number(p.current_layer)+1);
   $("printCommands").textContent=Number(p.completed_commands||0)+" / "+Number(p.total_commands||0);
+  $("printElapsed").textContent=p.elapsed_seconds==null?"—":formatDuration(p.elapsed_seconds);
+  $("printRemaining").textContent=p.estimated_remaining_seconds==null?"—":formatDuration(p.estimated_remaining_seconds);
+  $("printEstimatedTotal").textContent=p.estimated_total_seconds==null?"—":formatDuration(p.estimated_total_seconds);
+  $("printEta").textContent=p.estimated_finish_at_unix
+    ?new Date(Number(p.estimated_finish_at_unix)*1000).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})
+    :"—";
 
   $("pausePhysicalPrint").disabled=!running||paused;
   $("resumePhysicalPrint").disabled=!running||!paused;

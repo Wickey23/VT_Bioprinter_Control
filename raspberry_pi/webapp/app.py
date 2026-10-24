@@ -164,6 +164,8 @@ class SlicerRequest(BaseModel):
     calcium_chloride_mM: float = Field(default=80.0, ge=0.0, le=2000.0)
     crosslink_mode: str = Field(default="post_print", pattern="^(post_print|support_bath|manual)$")
     support_strategy: str = Field(default="self_supporting", pattern="^(self_supporting|support_bath|manual_scaffold)$")
+    temperature_mode: str = Field(default="ambient", pattern="^(ambient|heated_bed)$")
+    bed_temperature_c: float = Field(default=0.0, ge=0.0, le=60.0)
     extrusion_multiplier: float = Field(default=1.0, ge=0.1, le=5.0)
     travel_lift_mm: float = Field(default=1.0, ge=0.0, le=10.0)
     print_feed_mm_min: int = Field(default=240, ge=30, le=3000)
@@ -1268,6 +1270,8 @@ def api_slice_stl(payload: SlicerRequest) -> dict[str, Any]:
             calcium_chloride_mM=payload.calcium_chloride_mM,
             crosslink_mode=payload.crosslink_mode,
             support_strategy=payload.support_strategy,
+            temperature_mode=payload.temperature_mode,
+            bed_temperature_c=payload.bed_temperature_c,
             extrusion_multiplier=payload.extrusion_multiplier,
             travel_lift_mm=payload.travel_lift_mm,
             print_feed_mm_min=payload.print_feed_mm_min,
